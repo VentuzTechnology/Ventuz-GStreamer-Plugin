@@ -18,17 +18,14 @@ G_BEGIN_DECLS
 #define GST_IS_VENTUZ_VIDEO_SRC(obj) (G_TYPE_CHECK_INSTANCE_TYPE((obj), GST_TYPE_VENTUZ_VIDEO_SRC))
 #define GST_IS_VENTUZ_VIDEO_SRC_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE((klass), GST_TYPE_VENTUZ_VIDEO_SRC))
 
-typedef struct _VentuzVideoSrc VentuzVideoSrc;
-typedef struct _VentuzVideoSrcClass VentuzVideoSrcClass;
-
-struct _VentuzVideoSrc
+struct VentuzVideoSrc
 {
     GstPushSrc parent;
 
     int outputNumber;
 };
 
-struct _VentuzVideoSrcClass
+struct VentuzVideoSrcClass
 {
     GstPushSrcClass parent_class;
 };

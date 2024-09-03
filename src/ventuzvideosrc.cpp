@@ -14,12 +14,30 @@ enum
     PROP_OUTPUT_NUMBER,
 };
 
-void ventuz_video_src_get_property(GObject* object, guint property_id, GValue* value, GParamSpec* pspec)
+static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE("src",
+    GST_PAD_SRC,
+    GST_PAD_ALWAYS,
+    GST_STATIC_CAPS(
+        "video/x-h264, "
+        "stream-format = byte-stream, "
+        "width = " GST_VIDEO_SIZE_RANGE ", "
+        "height = " GST_VIDEO_SIZE_RANGE ", "
+        "framerate = " GST_VIDEO_FPS_RANGE "; "
+
+        "video/x-hevc, "
+        "stream-format = byte-stream, "
+        "width = " GST_VIDEO_SIZE_RANGE ", "
+        "height = " GST_VIDEO_SIZE_RANGE ", "
+        "framerate = " GST_VIDEO_FPS_RANGE "; "
+    )
+);
+
+static void get_property(GObject* object, guint property_id, GValue* value, GParamSpec* pspec)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(object);
 }
 
-static void ventuz_video_src_set_property(GObject* object, guint property_id, const GValue* value, GParamSpec* pspec)
+static void set_property(GObject* object, guint property_id, const GValue* value, GParamSpec* pspec)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(object);
 
@@ -30,14 +48,14 @@ static void ventuz_video_src_set_property(GObject* object, guint property_id, co
     }
 }
 
-static void ventuz_video_src_finalize(GObject* object)
+static void finalize(GObject* object)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(object);
 
     // TODO: clean up
 }
 
-static GstStateChangeReturn ventuz_video_src_change_state(GstElement* element, GstStateChange transition)
+static GstStateChangeReturn change_state(GstElement* element, GstStateChange transition)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(element);
     GstStateChangeReturn ret = GST_STATE_CHANGE_SUCCESS;
@@ -79,7 +97,7 @@ static GstStateChangeReturn ventuz_video_src_change_state(GstElement* element, G
     return ret;
 }
 
-static gboolean ventuz_video_src_query(GstBaseSrc* bsrc, GstQuery* query)
+static gboolean query(GstBaseSrc* bsrc, GstQuery* query)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
 
@@ -112,7 +130,7 @@ static gboolean ventuz_video_src_query(GstBaseSrc* bsrc, GstQuery* query)
     }
 }
 
-static GstCaps* ventuz_video_src_get_caps(GstBaseSrc* bsrc, GstCaps* filter)
+static GstCaps* get_caps(GstBaseSrc* bsrc, GstCaps* filter)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
     GstCaps* caps;
@@ -156,7 +174,7 @@ static GstCaps* ventuz_video_src_get_caps(GstBaseSrc* bsrc, GstCaps* filter)
 
 
 
-static gboolean ventuz_video_src_unlock(GstBaseSrc* bsrc)
+static gboolean unlock(GstBaseSrc* bsrc)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
 
@@ -169,7 +187,7 @@ static gboolean ventuz_video_src_unlock(GstBaseSrc* bsrc)
     return TRUE;
 }
 
-static gboolean ventuz_video_src_unlock_stop(GstBaseSrc* bsrc)
+static gboolean unlock_stop(GstBaseSrc* bsrc)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
 
@@ -187,7 +205,7 @@ static gboolean ventuz_video_src_unlock_stop(GstBaseSrc* bsrc)
     return TRUE;
 }
 
-static GstFlowReturn ventuz_video_src_create(GstPushSrc* psrc, GstBuffer** buffer)
+static GstFlowReturn create(GstPushSrc* psrc, GstBuffer** buffer)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(psrc);
     GstFlowReturn flow_ret = GST_FLOW_ERROR;
@@ -202,7 +220,6 @@ static void ventuz_video_src_class_init(VentuzVideoSrcClass* klass)
     GstElementClass* element_class = GST_ELEMENT_CLASS(klass);
     GstBaseSrcClass* basesrc_class = GST_BASE_SRC_CLASS(klass);
     GstPushSrcClass* pushsrc_class = GST_PUSH_SRC_CLASS(klass);
-    //GstCaps* templ_caps;
 
     gst_element_class_set_static_metadata(element_class,
         "Ventuz Stream Out video source",
@@ -211,38 +228,30 @@ static void ventuz_video_src_class_init(VentuzVideoSrcClass* klass)
         "Ventuz Technology <your.name@your.isp>");
 
 
-    gobject_class->set_property = ventuz_video_src_set_property;
-    gobject_class->get_property = ventuz_video_src_get_property;
-    gobject_class->finalize = ventuz_video_src_finalize;
+    gobject_class->set_property = set_property;
+    gobject_class->get_property = get_property;
+    gobject_class->finalize = finalize;
 
-    element_class->change_state = GST_DEBUG_FUNCPTR(ventuz_video_src_change_state);
+    element_class->change_state = GST_DEBUG_FUNCPTR(change_state);
 
-    basesrc_class->query = GST_DEBUG_FUNCPTR(ventuz_video_src_query);
+    basesrc_class->query = GST_DEBUG_FUNCPTR(query);
     basesrc_class->negotiate = NULL;
-    basesrc_class->get_caps = GST_DEBUG_FUNCPTR(ventuz_video_src_get_caps);
-    basesrc_class->unlock = GST_DEBUG_FUNCPTR(ventuz_video_src_unlock);
-    basesrc_class->unlock_stop = GST_DEBUG_FUNCPTR(ventuz_video_src_unlock_stop);
+    basesrc_class->get_caps = GST_DEBUG_FUNCPTR(get_caps);
+    basesrc_class->unlock = GST_DEBUG_FUNCPTR(unlock);
+    basesrc_class->unlock_stop = GST_DEBUG_FUNCPTR(unlock_stop);
 
-    pushsrc_class->create = GST_DEBUG_FUNCPTR(ventuz_video_src_create);
+    pushsrc_class->create = GST_DEBUG_FUNCPTR(create);
 
     g_object_class_install_property(gobject_class, PROP_OUTPUT_NUMBER,
         g_param_spec_int("output-number", "Output number",
             "Ventuz output number to use", 0, 7, 0,
             (GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_CONSTRUCT)));
 
-    auto templ_caps = gst_caps_new_empty();
-    gst_element_class_add_pad_template(element_class,
-        gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS, templ_caps));
-    gst_caps_unref(templ_caps);
-
+    gst_element_class_add_static_pad_template(element_class, &src_template);
 }
 
 static void ventuz_video_src_init(VentuzVideoSrc* self)
 {
-    /*
-    self->mode = DEFAULT_MODE;
-    self->caps_mode = GST_DECKLINK_MODE_AUTO;
-    */
     self->outputNumber = 0;
 
     gst_base_src_set_live(GST_BASE_SRC(self), TRUE);
