@@ -1,0 +1,155 @@
+#pragma once
+
+#include <stdint.h>
+#include <windows.h>
+
+namespace StreamOutPipe
+{
+    struct Header
+    {
+        enum { VERSION = 2 };
+
+        uint32_t hdrVersion;         // should be VERSION
+
+        uint32_t videoCodecFourCC;   // used video codec, currently 'h264' aka h.264
+        uint32_t videoWidth;         // width of image
+        uint32_t videoHeight;        // height of image
+        uint32_t videoFrameRateNum;  // frame rate numerator
+        uint32_t videoFrameRateDen;  // frame rate denominator
+
+        uint32_t audioCodecFourCC;   // used audio codec, currently 'pc16' aka 16 bit signed little endian PCM
+        uint32_t audioRate;          // audio sample rate, currently fixed at 48000
+        uint32_t audioChannels;      // audio channel count, currently 2
+    };
+
+    enum class Command : uint8_t
+    {
+        Nop = 0x00,             // Do nothing
+
+        RequestIDRFrame = 0x01, // Request an IDR frame. it may take a couple of frames until the IDR frame arrives due to latency reasons.
+
+        TouchBegin = 0x10,      // Start a touch. Must be followed by a TouchPara structure
+        TouchMove = 0x11,       // Move a touch. Must be followed by a TouchPara structure        
+        TouchEnd = 0x12,        // Release a touch. Must be followed by a TouchPara structure        
+        TouchCancel = 0x13,     // Cancal a touch if possible. Must be followed by a TouchPara structure
+
+        Char = 0x20,            // Send a keystroke. Must be followed by a KeyPara structure
+        KeyDown = 0x21,         // Send a key down event. Must be followed by a KeyPara structure
+        KeyUp = 0x22,           // Send a key up event. Must be followed by a KeyPara structure
+
+        MouseMove = 0x28,       // Mouse positon update. Must be followed by a MouseXYPara structure
+        MouseButtons = 0x29,    // Mouse buttons update. Must be followed by a MouseButtonsPara structure
+        MouseWheel = 0x2a,      // Mouse wheel update. Must be followed by a MouseXYPara structure
+
+        SetEncodePara = 0x30,   // Send encoder parameters. Must be followed by an EncodePara structure
+    };
+
+    // Parameters for Touch* PipeCommands    
+    struct TouchPara
+    {
+        uint32_t id;   // numerical id. Must be unique per touch (eg. finger # or something incremental)
+        int x;     // x coordinate in pixels from the left side of the viewport
+        int y;     // y coordinate in pixels from the upper side of the viewport
+    };
+
+    // Parameters for the Key PipeCommand
+    struct KeyPara
+    {
+        uint32_t Code;   // UTF32 codepoint for Char command; Windows VK_* for KeyUp/KeyDown
+    };
+
+    // Parameters for the MouseMove and MouseWheel PipeCommands
+    struct MouseXYPara
+    {
+        int x;     // x coordinate in pixels from the left side of the viewport, or horizontal wheel delta
+        int y;     // y coordinate in pixels from the upper side of the viewport, or vertical wheel delta
+    };
+
+    // Parameters for the MouseButtons PipeCommand
+    struct MouseButtonsPara
+    {
+        enum class MouseButtons : uint32_t
+        {
+            Left = 0x01,
+            Right = 0x02,
+            Middle = 0x04,
+            X1 = 0x08,
+            X2 = 0x10,
+        };
+
+        MouseButtons Buttons; // bit field of all buttons pressed at the time
+    };
+
+    // Parameters for the SetEncodePara PipeCommand
+    struct EncodePara
+    {
+        enum RateControlMode : uint32_t
+        {
+            ConstQP = 0,  // BitrateOrQP is QP (0..51)
+            ConstRate = 1, // BitrateOrQP is rate in kBits/s
+        };
+
+        RateControlMode Mode;
+        uint32_t BitrateOrQP;
+    };
+
+
+    class Client
+    {
+    public:
+
+        Client();
+        ~Client();
+
+        typedef void (*OnVideoFunc)(void* opaque, const uint8_t* data, size_t size, int64_t timecode, bool isIDR);
+        typedef void (*OnAudioFunc)(void* opaque, const uint8_t* data, size_t size, int64_t timecode);
+
+        void SetOnVideo(OnVideoFunc func, void* opaque) { onVideo = func; onVideoOpaque = opaque; }
+        void SetOnAudio(OnAudioFunc func, void* opaque) { onAudio = func; onAudioOpaque = opaque; }
+
+        bool Open(int outputNo);
+        bool Poll();
+
+        Header& GetHeader() { return header; }
+
+    private:
+
+        struct ChunkHeader
+        {
+            uint32_t fourCC;            // chunk type (four character code)
+            int size;               // size of chunk data
+        };
+
+        struct FrameHeader
+        {
+            enum FrameFlags : uint32_t
+            {
+                IDR_FRAME = 0x01,           // frame is IDR frame (aka key frame / stream restart/sync point)
+            };
+
+            uint32_t frameIndex;         // frame index. If this isn't perfectly contiguous there was a frame drop in Ventuz
+            FrameFlags flags;        // flags, see above
+        };
+
+        OnVideoFunc onVideo = nullptr;
+        void* onVideoOpaque = nullptr;
+        OnAudioFunc onAudio = nullptr;
+        void* onAudioOpaque = nullptr;
+
+        Header header = {};       
+
+        HANDLE pipe = INVALID_HANDLE_VALUE;
+
+        uint8_t* buffer = nullptr;
+        size_t bufferSize = 0;
+        uint32_t lastFrameIndex = 0;
+        int64_t audioTc = -1;
+
+        void Ensure(size_t size);
+
+        template<typename T> bool ReadStruct(T &data);
+        bool ReadBuffer(size_t size);
+    };
+
+
+}
