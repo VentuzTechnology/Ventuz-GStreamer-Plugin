@@ -32,9 +32,61 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE("src",
     )
 );
 
+static void OnVideo(void* opaque, const uint8_t* data, size_t size, int64_t timecode, bool isIDR)
+{
+    VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(opaque);
+
+    if (self->nextFrame)
+        gst_buffer_unref(self->nextFrame);
+    self->nextFrame = gst_buffer_new_memdup(data, size);
+
+    // timestamps
+    /*
+    auto& header = self->client.GetHeader();
+    gint64 ts = GST_SECOND * self->frameCount * header.videoFrameRateDen / header.videoFrameRateNum;
+    gint64 dur = GST_SECOND * header.videoFrameRateDen / header.videoFrameRateNum;
+    self->nextFrame->pts = ts;
+    self->nextFrame->duration = dur;
+    self->nextFrame->dts = ts + 10 * dur;
+    self->frameCount++;
+    */
+
+}
+
+static void ventuz_video_src_init(VentuzVideoSrc* self)
+{
+    self->outputNumber = 0;
+    self->flushing = false;
+    self->client.SetOnVideo(OnVideo, self);
+    self->frameCount = 0;
+
+    gst_base_src_set_live(GST_BASE_SRC(self), TRUE);
+    gst_base_src_set_format(GST_BASE_SRC(self), GST_FORMAT_TIME);
+
+    //gst_pad_use_fixed_caps(GST_BASE_SRC_PAD(self));
+
+    g_mutex_init(&self->lock);
+    g_cond_init(&self->cond);
+
+    /*
+    g_mutex_init(&self->lock);
+    g_cond_init(&self->cond);
+
+    self->current_frames =
+        gst_vec_deque_new_for_struct(sizeof(CaptureFrame),
+            DEFAULT_BUFFER_SIZE);
+            */
+}
+
 static void get_property(GObject* object, guint property_id, GValue* value, GParamSpec* pspec)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(object);
+
+    switch (property_id) {
+    case PROP_OUTPUT_NUMBER:
+        g_value_set_int(value, self->outputNumber);
+        break;
+    }
 }
 
 static void set_property(GObject* object, guint property_id, const GValue* value, GParamSpec* pspec)
@@ -43,16 +95,18 @@ static void set_property(GObject* object, guint property_id, const GValue* value
 
     switch (property_id) {
     case PROP_OUTPUT_NUMBER:
-        g_value_set_int((GValue*)value, self->outputNumber);
+        self->outputNumber = g_value_get_int(value);
         break;
     }
+
 }
 
 static void finalize(GObject* object)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(object);
 
-    // TODO: clean up
+    g_mutex_clear(&self->lock);
+    g_cond_clear(&self->cond);
 }
 
 static GstStateChangeReturn change_state(GstElement* element, GstStateChange transition)
@@ -64,6 +118,7 @@ static GstStateChangeReturn change_state(GstElement* element, GstStateChange tra
     case GST_STATE_CHANGE_NULL_TO_READY:
         break;
     case GST_STATE_CHANGE_READY_TO_PAUSED:
+        ret = GST_STATE_CHANGE_NO_PREROLL;
         break;
     default:
         break;
@@ -81,6 +136,7 @@ static GstStateChangeReturn change_state(GstElement* element, GstStateChange tra
     case GST_STATE_CHANGE_PLAYING_TO_PAUSED: {
 
         GST_DEBUG_OBJECT(self, "Stopping streams");
+        ret = GST_STATE_CHANGE_NO_PREROLL;
 
         break;
     }
@@ -95,6 +151,72 @@ static GstStateChangeReturn change_state(GstElement* element, GstStateChange tra
     }
 
     return ret;
+}
+
+static GstCaps* fixate(GstBaseSrc* src, GstCaps* caps)
+{
+    return caps;
+}
+
+static gboolean start(GstBaseSrc* bsrc)
+{
+    VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
+    
+    g_mutex_lock(&self->lock);
+    while (!self->client.Open(self->outputNumber))
+    {
+        guint64 wait_time = g_get_monotonic_time() + G_TIME_SPAN_MILLISECOND * 100;
+        g_cond_wait_until(&self->cond, &self->lock, wait_time);
+        if (self->flushing)
+        {
+            g_mutex_unlock(&self->lock);
+            return FALSE;
+        }
+    }
+
+    g_mutex_unlock(&self->lock);
+
+    // make caps from header
+    auto& header = self->client.GetHeader();
+
+    GstCaps* caps;
+
+    switch (header.videoCodecFourCC)
+    {
+    case 'h264': caps = gst_caps_new_simple("video/x-h264", NULL); break;
+    case 'hevc': caps = gst_caps_new_simple("video/x-hevc", NULL); break;
+    default:  
+        g_mutex_unlock(&self->lock);
+        return FALSE;
+    }
+
+    GstStructure* video_structure = gst_caps_get_structure(caps, 0);
+
+    gst_structure_set(video_structure, "stream-format", G_TYPE_STRING, "byte-stream", NULL);
+    gst_structure_set(video_structure, "alignment", G_TYPE_STRING, "au", NULL);
+    gst_structure_set(video_structure, "profile", G_TYPE_STRING, "main", NULL);
+     
+    gst_structure_set(video_structure, "width", G_TYPE_INT, header.videoWidth, NULL);
+    gst_structure_set(video_structure, "height", G_TYPE_INT, header.videoHeight, NULL);
+    //gst_structure_set(video_structure, "framerate", GST_TYPE_FRACTION, header.videoFrameRateNum, header.videoFrameRateDen, NULL);
+
+    gst_base_src_set_caps(bsrc, caps);
+
+    gst_caps_unref(caps);
+
+    gst_base_src_start_complete(bsrc, GST_FLOW_OK);
+
+    return TRUE;
+}
+
+static gboolean stop(GstBaseSrc* bsrc)
+{
+    VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
+
+    g_mutex_lock(&self->lock);
+
+    g_mutex_unlock(&self->lock);
+    return TRUE;
 }
 
 static gboolean query(GstBaseSrc* bsrc, GstQuery* query)
@@ -130,60 +252,15 @@ static gboolean query(GstBaseSrc* bsrc, GstQuery* query)
     }
 }
 
-static GstCaps* get_caps(GstBaseSrc* bsrc, GstCaps* filter)
-{
-    VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
-    GstCaps* caps;
-
-    /*
-    if (self->mode != GST_DECKLINK_MODE_AUTO) {
-        const GstDecklinkMode* gst_mode = ventuz_get_mode(self->mode);
-        BMDDynamicRange dynamic_range = device_dynamic_range(self);
-        caps =
-            ventuz_mode_get_caps(self->mode,
-                display_mode_flags(self, gst_mode, FALSE), self->caps_format,
-                dynamic_range, TRUE);
-    }
-    else if (self->caps_mode != GST_DECKLINK_MODE_AUTO) {
-        const GstDecklinkMode* gst_mode = ventuz_get_mode(self->caps_mode);
-        BMDDynamicRange dynamic_range = device_dynamic_range(self);
-        caps =
-            ventuz_mode_get_caps(self->caps_mode,
-                display_mode_flags(self, gst_mode, FALSE), self->caps_format,
-                dynamic_range, TRUE);
-    }
-    */
-    if (false)
-    {
-
-    }
-    else 
-    {
-        caps = gst_pad_get_pad_template_caps(GST_BASE_SRC_PAD(bsrc));
-    }
-
-    if (filter) {
-        GstCaps* tmp =
-            gst_caps_intersect_full(filter, caps, GST_CAPS_INTERSECT_FIRST);
-        gst_caps_unref(caps);
-        caps = tmp;
-    }
-
-    return caps;
-}
-
-
-
 static gboolean unlock(GstBaseSrc* bsrc)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
 
-    /*
     g_mutex_lock(&self->lock);
     self->flushing = TRUE;
     g_cond_signal(&self->cond);
     g_mutex_unlock(&self->lock);
-    */
+
     return TRUE;
 }
 
@@ -191,16 +268,18 @@ static gboolean unlock_stop(GstBaseSrc* bsrc)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
 
-    /*
     g_mutex_lock(&self->lock);
+
     self->flushing = FALSE;
-    while (gst_vec_deque_get_length(self->current_frames) > 0) {
-        CaptureFrame* tmp =
-            (CaptureFrame*)gst_vec_deque_pop_head_struct(self->current_frames);
-        capture_frame_clear(tmp);
+
+    if (self->nextFrame)
+    {
+        gst_buffer_unref(self->nextFrame);
+        self->nextFrame = nullptr;
     }
+
     g_mutex_unlock(&self->lock);
-    */
+
 
     return TRUE;
 }
@@ -210,6 +289,35 @@ static GstFlowReturn create(GstPushSrc* psrc, GstBuffer** buffer)
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(psrc);
     GstFlowReturn flow_ret = GST_FLOW_ERROR;
 
+    g_mutex_lock(&self->lock);
+    for (;;)
+    {
+        if (self->flushing)
+        {
+            flow_ret = GST_FLOW_FLUSHING;
+            break;
+        }
+
+        bool ok = self->client.Poll();
+        if (!ok)
+        {
+            flow_ret = GST_FLOW_ERROR;
+            break;
+        }
+
+        if (self->nextFrame)
+        {                        
+            *buffer = self->nextFrame;
+            self->nextFrame = nullptr;
+            flow_ret = GST_FLOW_OK;
+            break;
+        }
+
+        guint64 wait_time = g_get_monotonic_time() + G_TIME_SPAN_MILLISECOND;
+        g_cond_wait_until(&self->cond, &self->lock, wait_time);
+    }
+
+    g_mutex_unlock(&self->lock);
     return flow_ret;
 }
 
@@ -236,9 +344,12 @@ static void ventuz_video_src_class_init(VentuzVideoSrcClass* klass)
 
     basesrc_class->query = GST_DEBUG_FUNCPTR(query);
     basesrc_class->negotiate = NULL;
-    basesrc_class->get_caps = GST_DEBUG_FUNCPTR(get_caps);
     basesrc_class->unlock = GST_DEBUG_FUNCPTR(unlock);
     basesrc_class->unlock_stop = GST_DEBUG_FUNCPTR(unlock_stop);
+    basesrc_class->start = GST_DEBUG_FUNCPTR(start);
+    basesrc_class->stop = GST_DEBUG_FUNCPTR(stop);
+    basesrc_class->fixate = GST_DEBUG_FUNCPTR(fixate);
+
 
     pushsrc_class->create = GST_DEBUG_FUNCPTR(create);
 
@@ -248,25 +359,6 @@ static void ventuz_video_src_class_init(VentuzVideoSrcClass* klass)
             (GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_CONSTRUCT)));
 
     gst_element_class_add_static_pad_template(element_class, &src_template);
-}
-
-static void ventuz_video_src_init(VentuzVideoSrc* self)
-{
-    self->outputNumber = 0;
-
-    gst_base_src_set_live(GST_BASE_SRC(self), TRUE);
-    gst_base_src_set_format(GST_BASE_SRC(self), GST_FORMAT_TIME);
-
-    gst_pad_use_fixed_caps(GST_BASE_SRC_PAD(self));
-
-    /*
-    g_mutex_init(&self->lock);
-    g_cond_init(&self->cond);
-
-    self->current_frames =
-        gst_vec_deque_new_for_struct(sizeof(CaptureFrame),
-            DEFAULT_BUFFER_SIZE);
-            */
 }
 
 GST_ELEMENT_REGISTER_DEFINE(ventuzvideosrc, "ventuzvideosrc", GST_RANK_NONE,

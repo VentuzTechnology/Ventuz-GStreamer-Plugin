@@ -108,6 +108,7 @@ namespace StreamOutPipe
         void SetOnAudio(OnAudioFunc func, void* opaque) { onAudio = func; onAudioOpaque = opaque; }
 
         bool Open(int outputNo);
+        void Close();
         bool Poll();
 
         Header& GetHeader() { return header; }

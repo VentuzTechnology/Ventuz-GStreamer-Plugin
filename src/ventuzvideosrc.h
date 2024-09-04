@@ -7,6 +7,8 @@
 #include <gst/base/base.h>
 #include <gst/video/video.h>
 
+#include "streamoutpipe.h"
+
 #pragma warning (pop)
 
 G_BEGIN_DECLS
@@ -23,6 +25,14 @@ struct VentuzVideoSrc
     GstPushSrc parent;
 
     int outputNumber;
+    bool flushing;
+
+    StreamOutPipe::Client client;
+
+    GCond cond;
+    GMutex lock;
+    GstBuffer* nextFrame;
+    gint64 frameCount;
 };
 
 struct VentuzVideoSrcClass

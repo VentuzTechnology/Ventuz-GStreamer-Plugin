@@ -14,10 +14,8 @@ namespace StreamOutPipe
     }
 
     Client::~Client()
-    {
-        if (pipe != INVALID_HANDLE_VALUE)
-            CloseHandle(pipe);
-
+    {     
+        Close();
         delete[] buffer;
     }
 
@@ -36,13 +34,7 @@ namespace StreamOutPipe
                 break;
 
             DWORD err = GetLastError();
-
-            if (err == ENOENT)
-            {
-                Sleep(1000);
-                continue;
-            }
-
+           
             if (err != ERROR_PIPE_BUSY)
             {
                 return false;
@@ -66,17 +58,22 @@ namespace StreamOutPipe
         return true;
     }
 
+    void Client::Close()
+    {
+        if (pipe != INVALID_HANDLE_VALUE)
+            CloseHandle(pipe);
+        pipe = INVALID_HANDLE_VALUE;
+    }
+
     bool Client::Poll()
     {
         ChunkHeader chunk;
-        if (!ReadStruct(chunk))
-            return false;
 
-        if (chunk.fourCC != 'fhdr')
+        do
         {
-            // skip unknown chunks
-            return ReadBuffer(chunk.size);
-        }
+            if (!ReadStruct(chunk))
+                return false;
+        } while (chunk.fourCC != 'fhdr');
 
         FrameHeader frameHeader;
         if (!ReadStruct(frameHeader))
@@ -99,7 +96,7 @@ namespace StreamOutPipe
         audioTc += (int64_t)chunk.size / (2ll * header.audioChannels);
         lastFrameIndex = frameHeader.frameIndex;
 
-        return false;
+        return true;
     }
 
     void Client::Ensure(size_t size)
