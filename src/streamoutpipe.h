@@ -111,7 +111,9 @@ namespace StreamOutPipe
         void Close();
         bool Poll();
 
-        Header& GetHeader() { return header; }
+        bool IsOpen() const { return pipe != INVALID_HANDLE_VALUE; }
+
+        const Header& GetHeader() const { return header; }
 
     private:
 

@@ -35,21 +35,20 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE("src",
 static void OnVideo(void* opaque, const uint8_t* data, size_t size, int64_t timecode, bool isIDR)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(opaque);
+    GstElement* elem = GST_ELEMENT(opaque);
+    GstBaseSrc* base = GST_BASE_SRC(opaque);
 
     if (self->nextFrame)
         gst_buffer_unref(self->nextFrame);
     self->nextFrame = gst_buffer_new_memdup(data, size);
 
     // timestamps
-    /*
     auto& header = self->client.GetHeader();
-    gint64 ts = GST_SECOND * self->frameCount * header.videoFrameRateDen / header.videoFrameRateNum;
+    gint64 ts = base->segment.start + GST_SECOND * self->frameCount * header.videoFrameRateDen / header.videoFrameRateNum;
     gint64 dur = GST_SECOND * header.videoFrameRateDen / header.videoFrameRateNum;
-    self->nextFrame->pts = ts;
-    self->nextFrame->duration = dur;
-    self->nextFrame->dts = ts + 10 * dur;
+    GST_BUFFER_TIMESTAMP(self->nextFrame) = ts;
+    GST_BUFFER_DURATION(self->nextFrame) = dur;
     self->frameCount++;
-    */
 
 }
 
@@ -63,19 +62,9 @@ static void ventuz_video_src_init(VentuzVideoSrc* self)
     gst_base_src_set_live(GST_BASE_SRC(self), TRUE);
     gst_base_src_set_format(GST_BASE_SRC(self), GST_FORMAT_TIME);
 
-    //gst_pad_use_fixed_caps(GST_BASE_SRC_PAD(self));
-
     g_mutex_init(&self->lock);
     g_cond_init(&self->cond);
 
-    /*
-    g_mutex_init(&self->lock);
-    g_cond_init(&self->cond);
-
-    self->current_frames =
-        gst_vec_deque_new_for_struct(sizeof(CaptureFrame),
-            DEFAULT_BUFFER_SIZE);
-            */
 }
 
 static void get_property(GObject* object, guint property_id, GValue* value, GParamSpec* pspec)
@@ -225,25 +214,18 @@ static gboolean query(GstBaseSrc* bsrc, GstQuery* query)
 
     switch (GST_QUERY_TYPE(query)) {
     case GST_QUERY_LATENCY: {
-        /*
-        if (self->input) {
-            GstClockTime min, max;
-            const GstDecklinkMode* mode;
+        if (self->client.IsOpen()) {
 
-            g_mutex_lock(&self->lock);
-            mode = ventuz_get_mode(self->caps_mode);
-            g_mutex_unlock(&self->lock);
+            auto &header = self->client.GetHeader();
 
-            min = gst_util_uint64_scale_ceil(GST_SECOND, mode->fps_d, mode->fps_n);
-            max = self->buffer_size * min;
+            guint64 min = gst_util_uint64_scale_ceil(GST_SECOND, header.videoFrameRateDen, header.videoFrameRateNum);
+            guint64 max =  min;
 
             gst_query_set_latency(query, TRUE, min, max);
-            ret = TRUE;
+            return TRUE;
         }
-        else {
-            ret = FALSE;
-        }
-        */
+        else
+            return FALSE;
 
         return FALSE;
     }
