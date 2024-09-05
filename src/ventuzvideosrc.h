@@ -27,7 +27,8 @@ struct VentuzVideoSrc
     int outputNumber;
     bool flushing;
 
-    StreamOutPipe::Client client;
+    void* outputHandle;
+    StreamOutPipe::PipeHeader outputHeader;
 
     GCond cond;
     GMutex lock;

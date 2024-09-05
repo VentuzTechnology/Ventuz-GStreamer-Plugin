@@ -43,7 +43,7 @@ static void OnVideo(void* opaque, const uint8_t* data, size_t size, int64_t time
     self->nextFrame = gst_buffer_new_memdup(data, size);
 
     // timestamps
-    auto& header = self->client.GetHeader();
+    auto& header = self->outputHeader;
     gint64 ts = base->segment.start + GST_SECOND * self->frameCount * header.videoFrameRateDen / header.videoFrameRateNum;
     gint64 dur = GST_SECOND * header.videoFrameRateDen / header.videoFrameRateNum;
     GST_BUFFER_TIMESTAMP(self->nextFrame) = ts;
@@ -56,7 +56,6 @@ static void ventuz_video_src_init(VentuzVideoSrc* self)
 {
     self->outputNumber = 0;
     self->flushing = false;
-    self->client.SetOnVideo(OnVideo, self);
     self->frameCount = 0;
 
     gst_base_src_set_live(GST_BASE_SRC(self), TRUE);
@@ -147,10 +146,58 @@ static GstCaps* fixate(GstBaseSrc* src, GstCaps* caps)
     return caps;
 }
 
+static void onOutputStart(void* opaque, const StreamOutPipe::PipeHeader& header)
+{
+    VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(opaque);
+    GstBaseSrc* bsrc = GST_BASE_SRC(opaque);
+
+    self->outputHeader = header;
+
+    GstCaps* caps;
+
+    switch (header.videoCodecFourCC)
+    {
+    case 'h264': caps = gst_caps_new_simple("video/x-h264", NULL); break;
+    case 'hevc': caps = gst_caps_new_simple("video/x-hevc", NULL); break;
+    default:  
+        // TODO: some error
+        return;
+    }
+
+    GstStructure* video_structure = gst_caps_get_structure(caps, 0);
+
+    gst_structure_set(video_structure, "stream-format", G_TYPE_STRING, "byte-stream", NULL);
+    gst_structure_set(video_structure, "alignment", G_TYPE_STRING, "au", NULL);
+    gst_structure_set(video_structure, "profile", G_TYPE_STRING, "main", NULL);
+
+    gst_structure_set(video_structure, "width", G_TYPE_INT, header.videoWidth, NULL);
+    gst_structure_set(video_structure, "height", G_TYPE_INT, header.videoHeight, NULL);
+    //gst_structure_set(video_structure, "framerate", GST_TYPE_FRACTION, header.videoFrameRateNum, header.videoFrameRateDen, NULL);
+
+    gst_base_src_set_caps(bsrc, caps);
+
+    gst_caps_unref(caps);
+}
+
+static void onOutputStop(void* opaque)
+{
+    VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(opaque);
+    GstBaseSrc* bsrc = GST_BASE_SRC(opaque);
+}
+
+
 static gboolean start(GstBaseSrc* bsrc)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
     
+    self->outputHandle = StreamOutPipe::Manager::Instance.Acquire(self->outputNumber, {
+        .opaque = bsrc,
+        .onStart = onOutputStart,
+        .onStop = onOutputStop,
+        .onVideo = OnVideo,
+    }),
+
+    /*
     g_mutex_lock(&self->lock);
     while (!self->client.Open(self->outputNumber))
     {
@@ -164,34 +211,7 @@ static gboolean start(GstBaseSrc* bsrc)
     }
 
     g_mutex_unlock(&self->lock);
-
-    // make caps from header
-    auto& header = self->client.GetHeader();
-
-    GstCaps* caps;
-
-    switch (header.videoCodecFourCC)
-    {
-    case 'h264': caps = gst_caps_new_simple("video/x-h264", NULL); break;
-    case 'hevc': caps = gst_caps_new_simple("video/x-hevc", NULL); break;
-    default:  
-        g_mutex_unlock(&self->lock);
-        return FALSE;
-    }
-
-    GstStructure* video_structure = gst_caps_get_structure(caps, 0);
-
-    gst_structure_set(video_structure, "stream-format", G_TYPE_STRING, "byte-stream", NULL);
-    gst_structure_set(video_structure, "alignment", G_TYPE_STRING, "au", NULL);
-    gst_structure_set(video_structure, "profile", G_TYPE_STRING, "main", NULL);
-     
-    gst_structure_set(video_structure, "width", G_TYPE_INT, header.videoWidth, NULL);
-    gst_structure_set(video_structure, "height", G_TYPE_INT, header.videoHeight, NULL);
-    //gst_structure_set(video_structure, "framerate", GST_TYPE_FRACTION, header.videoFrameRateNum, header.videoFrameRateDen, NULL);
-
-    gst_base_src_set_caps(bsrc, caps);
-
-    gst_caps_unref(caps);
+    */
 
     gst_base_src_start_complete(bsrc, GST_FLOW_OK);
 
@@ -204,6 +224,9 @@ static gboolean stop(GstBaseSrc* bsrc)
 
     g_mutex_lock(&self->lock);
 
+    StreamOutPipe::Manager::Instance.Release(self->outputNumber, &self->outputHandle);
+
+
     g_mutex_unlock(&self->lock);
     return TRUE;
 }
@@ -214,9 +237,9 @@ static gboolean query(GstBaseSrc* bsrc, GstQuery* query)
 
     switch (GST_QUERY_TYPE(query)) {
     case GST_QUERY_LATENCY: {
-        if (self->client.IsOpen()) {
+        if (self->outputHandle) {
 
-            auto &header = self->client.GetHeader();
+            auto &header = self->outputHeader;
 
             guint64 min = gst_util_uint64_scale_ceil(GST_SECOND, header.videoFrameRateDen, header.videoFrameRateNum);
             guint64 max =  min;
@@ -280,12 +303,14 @@ static GstFlowReturn create(GstPushSrc* psrc, GstBuffer** buffer)
             break;
         }
 
+        /*
         bool ok = self->client.Poll();
         if (!ok)
         {
             flow_ret = GST_FLOW_ERROR;
             break;
         }
+        */
 
         if (self->nextFrame)
         {                        
@@ -343,5 +368,4 @@ static void ventuz_video_src_class_init(VentuzVideoSrcClass* klass)
     gst_element_class_add_static_pad_template(element_class, &src_template);
 }
 
-GST_ELEMENT_REGISTER_DEFINE(ventuzvideosrc, "ventuzvideosrc", GST_RANK_NONE,
-    GST_TYPE_VENTUZ_VIDEO_SRC);
+GST_ELEMENT_REGISTER_DEFINE(ventuzvideosrc, "ventuzvideosrc", GST_RANK_NONE,  GST_TYPE_VENTUZ_VIDEO_SRC);

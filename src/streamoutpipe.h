@@ -3,9 +3,11 @@
 #include <stdint.h>
 #include <windows.h>
 
+#include <gst/gst.h>
+
 namespace StreamOutPipe
 {
-    struct Header
+    struct PipeHeader
     {
         enum { VERSION = 2 };
 
@@ -93,6 +95,10 @@ namespace StreamOutPipe
         uint32_t BitrateOrQP;
     };
 
+    typedef void (*OnStartFunc)(void* opaque, const PipeHeader& header);
+    typedef void (*OnStopFunc)(void* opaque);
+    typedef void (*OnVideoFunc)(void* opaque, const uint8_t* data, size_t size, int64_t timecode, bool isIDR);
+    typedef void (*OnAudioFunc)(void* opaque, const uint8_t* data, size_t size, int64_t timecode);
 
     class Client
     {
@@ -100,9 +106,6 @@ namespace StreamOutPipe
 
         Client();
         ~Client();
-
-        typedef void (*OnVideoFunc)(void* opaque, const uint8_t* data, size_t size, int64_t timecode, bool isIDR);
-        typedef void (*OnAudioFunc)(void* opaque, const uint8_t* data, size_t size, int64_t timecode);
 
         void SetOnVideo(OnVideoFunc func, void* opaque) { onVideo = func; onVideoOpaque = opaque; }
         void SetOnAudio(OnAudioFunc func, void* opaque) { onAudio = func; onAudioOpaque = opaque; }
@@ -113,7 +116,7 @@ namespace StreamOutPipe
 
         bool IsOpen() const { return pipe != INVALID_HANDLE_VALUE; }
 
-        const Header& GetHeader() const { return header; }
+        const PipeHeader& GetHeader() const { return header; }
 
     private:
 
@@ -139,7 +142,7 @@ namespace StreamOutPipe
         OnAudioFunc onAudio = nullptr;
         void* onAudioOpaque = nullptr;
 
-        Header header = {};       
+        PipeHeader header = {};       
 
         HANDLE pipe = INVALID_HANDLE_VALUE;
 
@@ -154,5 +157,59 @@ namespace StreamOutPipe
         bool ReadBuffer(size_t size);
     };
 
+
+    class Manager
+    {
+    public:
+        static Manager Instance;
+
+        struct SrcDesc
+        {
+            void* opaque = nullptr;
+            OnStartFunc onStart = nullptr;
+            OnStopFunc onStop = nullptr;
+            OnVideoFunc onVideo = nullptr;
+            OnAudioFunc onAudio = nullptr;
+        };
+
+        void* Acquire(int output, const SrcDesc& desc);
+        void Release(int output, void**);
+
+    private:
+
+        static const int MAX_OUTS = 8;
+
+        Manager();
+        ~Manager();
+
+
+        struct Output
+        {
+            int outputNo;
+            Client client;
+            GList* nodes = nullptr;
+            GThread* thread = nullptr;
+            GMutex threadLock;
+            GMutex nodeLock;
+            bool exit = false;
+
+            static gpointer ThreadProxy(gpointer data) { return ((Output*)data)->ThreadFunc(); }
+            gpointer ThreadFunc();
+            void OnVideo(const uint8_t* data, size_t size, int64_t timecode, bool isIDR);
+            void OnAudio(const uint8_t* data, size_t size, int64_t timecode);
+
+            static void OnVideoProxy(void* opaque, const uint8_t* data, size_t size, int64_t timecode, bool isIDR)
+            {
+                ((Output*)opaque)->OnVideo(data, size, timecode, isIDR);
+            }
+
+            static void OnAudioProxy(void* opaque, const uint8_t* data, size_t size, int64_t timecode)
+            {
+                ((Output*)opaque)->OnAudio(data, size, timecode);
+            }           
+        };
+
+        Output outputs[MAX_OUTS] = {};
+    };
 
 }
