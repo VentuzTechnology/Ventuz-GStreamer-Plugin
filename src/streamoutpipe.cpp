@@ -6,20 +6,18 @@
 
 namespace StreamOutPipe
 {
-
-
-    Client::Client()
+    PipeClient::PipeClient()
     {
 
     }
 
-    Client::~Client()
+    PipeClient::~PipeClient()
     {     
         Close();
         delete[] buffer;
     }
 
-    bool Client::Open(int outputNo)
+    bool PipeClient::Open(int outputNo)
     {
         char pipeName[64];
         sprintf_s(pipeName, "\\\\.\\pipe\\VentuzOut%c", 'A' + outputNo);
@@ -55,19 +53,28 @@ namespace StreamOutPipe
             return false;
 
         audioTc = -1;
+        idrRequested = 0;
         return true;
     }
 
-    void Client::Close()
+    void PipeClient::Close()
     {
         if (pipe != INVALID_HANDLE_VALUE)
             CloseHandle(pipe);
         pipe = INVALID_HANDLE_VALUE;
     }
 
-    bool Client::Poll()
+    bool PipeClient::Poll()
     {
         ChunkHeader chunk;
+
+        if (InterlockedExchange(&idrRequested, 0))
+        {
+            uint8_t cmd = (uint8_t)Command::RequestIDRFrame;
+
+            DWORD written;
+            WriteFile(pipe, &cmd, 1, &written, NULL);
+        }
 
         do
         {
@@ -99,7 +106,7 @@ namespace StreamOutPipe
             return true;
     }
 
-    void Client::Ensure(size_t size)
+    void PipeClient::Ensure(size_t size)
     {
         if (size <= bufferSize)
             return;
@@ -109,7 +116,7 @@ namespace StreamOutPipe
         bufferSize = size;
     }
 
-    template<typename T> bool Client::ReadStruct(T& data)
+    template<typename T> bool PipeClient::ReadStruct(T& data)
     {
         DWORD bytesRead = 0;
 
@@ -119,7 +126,7 @@ namespace StreamOutPipe
         return (ret && bytesRead == size);
     }
 
-    bool Client::ReadBuffer(size_t size)
+    bool PipeClient::ReadBuffer(size_t size)
     {
         Ensure(size);
 
@@ -129,9 +136,9 @@ namespace StreamOutPipe
         return ret && bytesRead == size;
     }
 
-    Manager Manager::Instance;
+    OutputManager OutputManager::Instance;
 
-    Manager::Manager()
+    OutputManager::OutputManager()
     {
         for (int i = 0; i < MAX_OUTS; i++)
         {
@@ -143,17 +150,19 @@ namespace StreamOutPipe
         }
     }
 
-    Manager::~Manager()
+    OutputManager::~OutputManager()
     {
         for (int i = 0; i < MAX_OUTS; i++)
         {
             g_mutex_clear(&outputs[i].nodeLock);
             g_mutex_clear(&outputs[i].threadLock);
+            for (GList* n = outputs[i].nodes; n; n = n->next)
+                delete (Callbacks*)n->data;
             g_list_free(outputs[i].nodes);
         }
     }
 
-    gpointer Manager::Output::ThreadFunc()
+    gpointer OutputManager::Output::ThreadFunc()
     {
         while (!exit)
         {
@@ -166,7 +175,7 @@ namespace StreamOutPipe
                 
                     for (GList *n = nodes; n; n=n->next)
                     {
-                        SrcDesc* desc = (SrcDesc*)n->data;
+                        Callbacks* desc = (Callbacks*)n->data;
                         if (desc->onStart) desc->onStart(desc->opaque, client.GetHeader());
                     }
 
@@ -185,7 +194,7 @@ namespace StreamOutPipe
 
                     for (GList* n = nodes; n; n = n->next)
                     {
-                        SrcDesc* desc = (SrcDesc*)n->data;
+                        Callbacks* desc = (Callbacks*)n->data;
                         if (desc->onStop) desc->onStop(desc->opaque);
                     }
 
@@ -199,33 +208,33 @@ namespace StreamOutPipe
         return NULL;
     }
 
-    void Manager::Output::OnVideo(const uint8_t* data, size_t size, int64_t timecode, bool isIDR)
+    void OutputManager::Output::OnVideo(const uint8_t* data, size_t size, int64_t timecode, bool isIDR)
     {
         g_mutex_lock(&nodeLock);
 
         for (GList* n = nodes; n; n = n->next)
         {
-            SrcDesc* desc = (SrcDesc*)n->data;
+            Callbacks* desc = (Callbacks*)n->data;
             if (desc->onVideo) desc->onVideo(desc->opaque, data, size, timecode, isIDR);
         }
 
         g_mutex_unlock(&nodeLock);
     }
 
-    void Manager::Output::OnAudio(const uint8_t* data, size_t size, int64_t timecode)
+    void OutputManager::Output::OnAudio(const uint8_t* data, size_t size, int64_t timecode)
     {
         g_mutex_lock(&nodeLock);
 
         for (GList* n = nodes; n; n = n->next)
         {
-            SrcDesc* desc = (SrcDesc*)n->data;
+            Callbacks* desc = (Callbacks*)n->data;
             if (desc->onAudio) desc->onAudio(desc->opaque, data, size, timecode);
         }
 
         g_mutex_unlock(&nodeLock);
     }
 
-    void* Manager::Acquire(int output, const SrcDesc& desc)
+    void* OutputManager::Acquire(int output, const Callbacks& desc)
     {
         g_assert(output >= 0 && output < MAX_OUTS);
 
@@ -234,7 +243,7 @@ namespace StreamOutPipe
         g_mutex_lock(&out.threadLock);
 
         g_mutex_lock(&out.nodeLock);
-        SrcDesc* node = new SrcDesc(desc);
+        Callbacks* node = new Callbacks(desc);
         out.nodes = g_list_append(out.nodes, node);
         g_mutex_unlock(&out.nodeLock);
 
@@ -245,23 +254,25 @@ namespace StreamOutPipe
         }
         g_mutex_unlock(&out.threadLock);
 
+        out.client.RequestIDR();
+
         return node;
     }
 
-    void Manager::Release(int output, void** nodeptr)
+    void OutputManager::Release(int output, void** nodeptr)
     {
         g_assert(output >= 0 && output < MAX_OUTS);
         g_assert(nodeptr);
 
-        SrcDesc* node = (SrcDesc*)*nodeptr;
+        Callbacks* node = (Callbacks*)*nodeptr;
         if (!node) return;
 
         *nodeptr = nullptr;
         Output& out = outputs[output];
 
         g_mutex_lock(&out.threadLock);
-
         g_mutex_lock(&out.nodeLock);
+
         out.nodes = g_list_remove(out.nodes, node);
         delete node;
 
@@ -274,9 +285,9 @@ namespace StreamOutPipe
             g_thread_join(out.thread);
             out.thread = nullptr;
             out.exit = false;
-
-            g_mutex_unlock(&out.threadLock);
         }
+
+        g_mutex_unlock(&out.threadLock);
     }
 }
 

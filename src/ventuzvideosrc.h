@@ -29,10 +29,11 @@ struct VentuzVideoSrc
 
     void* outputHandle;
     StreamOutPipe::PipeHeader outputHeader;
+    bool gotIDR;
 
     GCond cond;
     GMutex lock;
-    GstBuffer* nextFrame;
+    GQueue* frames;
     gint64 frameCount;
 };
 

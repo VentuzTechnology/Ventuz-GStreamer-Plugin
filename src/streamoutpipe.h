@@ -100,12 +100,12 @@ namespace StreamOutPipe
     typedef void (*OnVideoFunc)(void* opaque, const uint8_t* data, size_t size, int64_t timecode, bool isIDR);
     typedef void (*OnAudioFunc)(void* opaque, const uint8_t* data, size_t size, int64_t timecode);
 
-    class Client
+    class PipeClient
     {
     public:
 
-        Client();
-        ~Client();
+        PipeClient();
+        ~PipeClient();
 
         void SetOnVideo(OnVideoFunc func, void* opaque) { onVideo = func; onVideoOpaque = opaque; }
         void SetOnAudio(OnAudioFunc func, void* opaque) { onAudio = func; onAudioOpaque = opaque; }
@@ -117,6 +117,8 @@ namespace StreamOutPipe
         bool IsOpen() const { return pipe != INVALID_HANDLE_VALUE; }
 
         const PipeHeader& GetHeader() const { return header; }
+
+        void RequestIDR() { idrRequested = 1; }
 
     private:
 
@@ -151,6 +153,8 @@ namespace StreamOutPipe
         uint32_t lastFrameIndex = 0;
         int64_t audioTc = -1;
 
+        volatile uint32_t idrRequested = 0;
+
         void Ensure(size_t size);
 
         template<typename T> bool ReadStruct(T &data);
@@ -158,12 +162,12 @@ namespace StreamOutPipe
     };
 
 
-    class Manager
+    class OutputManager
     {
     public:
-        static Manager Instance;
+        static OutputManager Instance;
 
-        struct SrcDesc
+        struct Callbacks
         {
             void* opaque = nullptr;
             OnStartFunc onStart = nullptr;
@@ -172,21 +176,20 @@ namespace StreamOutPipe
             OnAudioFunc onAudio = nullptr;
         };
 
-        void* Acquire(int output, const SrcDesc& desc);
+        void* Acquire(int output, const Callbacks& desc);
         void Release(int output, void**);
 
     private:
 
         static const int MAX_OUTS = 8;
 
-        Manager();
-        ~Manager();
-
+        OutputManager();
+        ~OutputManager();
 
         struct Output
         {
             int outputNo;
-            Client client;
+            PipeClient client;
             GList* nodes = nullptr;
             GThread* thread = nullptr;
             GMutex threadLock;
