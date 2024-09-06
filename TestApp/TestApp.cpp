@@ -36,7 +36,7 @@ static gboolean bus_call(GstBus* bus, GstMessage* msg, gpointer data)
 gint main(gint argc, gchar* argv[])
 {
     GstStateChangeReturn ret;
-    GstElement* pipeline, * sink, * src, * dec;
+    GstElement* pipeline, * sink, * src, * dec, * parse, * mux;
     GMainLoop* loop;
     GstBus* bus;
     guint watch_id;
@@ -57,6 +57,11 @@ gint main(gint argc, gchar* argv[])
 
     src = gst_element_factory_make("ventuzvideosrc", "src");
     dec = gst_element_factory_make("openh264dec", "dec");
+//    mux = gst_element_factory_make("tsmux", "mux");
+    //sink = gst_element_factory_make("srtsink", "sink");
+
+    //g_object_set(sink, "uri", "srt://localhost:10001", NULL);
+
     sink = gst_element_factory_make("autovideosink", "sink");
 
     if (!src || !sink) {
@@ -71,7 +76,7 @@ gint main(gint argc, gchar* argv[])
     gst_bin_add_many(GST_BIN(pipeline), src, dec, sink, NULL);
 
     /* link everything together */
-    if (!gst_element_link_many(src, dec, sink, NULL)) {
+    if (!gst_element_link_many(src,  dec, sink, NULL)) {
         g_print("Failed to link one or more elements!\n");
         return -1;
     }

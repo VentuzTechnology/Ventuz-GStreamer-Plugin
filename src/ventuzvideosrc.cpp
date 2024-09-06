@@ -22,12 +22,15 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE("src",
         "stream-format = byte-stream, "
         "width = " GST_VIDEO_SIZE_RANGE ", "
         "height = " GST_VIDEO_SIZE_RANGE ", "
+        "alignment = au, "
+        "profile = main, "
         "framerate = " GST_VIDEO_FPS_RANGE "; "
 
         "video/x-hevc, "
         "stream-format = byte-stream, "
         "width = " GST_VIDEO_SIZE_RANGE ", "
         "height = " GST_VIDEO_SIZE_RANGE ", "
+        "alignment = au, "
         "framerate = " GST_VIDEO_FPS_RANGE "; "
     )
 );
@@ -52,16 +55,25 @@ static void OnVideo(void* opaque, const uint8_t* data, size_t size, int64_t time
 
     // timestamps
     auto& header = self->outputHeader;
-    gint64 ts = base->segment.start + GST_SECOND * self->frameCount * header.videoFrameRateDen / header.videoFrameRateNum;
-    gint64 dur = GST_SECOND * header.videoFrameRateDen / header.videoFrameRateNum;
-    GST_BUFFER_TIMESTAMP(buffer) = ts;
+    GstClockTimeDiff dur = GST_SECOND * header.videoFrameRateDen / header.videoFrameRateNum;
+    GstClock* clock = gst_element_get_clock(GST_ELEMENT(self));
+    GstClockTime baseTime = gst_element_get_base_time(GST_ELEMENT(self));
     GST_BUFFER_DURATION(buffer) = dur;
+    GST_BUFFER_TIMESTAMP(buffer) = gst_clock_get_time(clock) + StreamOutPipe::OutputManager::Instance.GetTimeDiff(timecode) - baseTime;
+    gst_object_unref(clock);
     self->frameCount++;
 
     g_mutex_lock(&self->lock);
-    g_queue_push_tail(self->frames, buffer);
-    g_cond_signal(&self->cond);
+
+    if (g_queue_get_length(self->frames) < VentuzVideoSrc::MAX_Q)
+    {
+        g_queue_push_tail(self->frames, buffer);
+        g_cond_signal(&self->cond);
+    }
+    else
+        gst_buffer_unref(buffer);
     g_mutex_unlock(&self->lock);
+
 }
 
 static void ventuz_video_src_init(VentuzVideoSrc* self)
@@ -78,6 +90,7 @@ static void ventuz_video_src_init(VentuzVideoSrc* self)
     g_mutex_init(&self->lock);
     g_cond_init(&self->cond);
 
+    GST_OBJECT_FLAG_SET(self, GST_ELEMENT_FLAG_PROVIDE_CLOCK);
 }
 
 static void get_property(GObject* object, guint property_id, GValue* value, GParamSpec* pspec)
@@ -155,6 +168,11 @@ static GstStateChangeReturn change_state(GstElement* element, GstStateChange tra
     return ret;
 }
 
+static GstClock* provide_clock(GstElement *elem)
+{
+    return StreamOutPipe::OutputManager::Instance.GetClock();
+}
+
 static GstCaps* fixate(GstBaseSrc* src, GstCaps* caps)
 {
     return caps;
@@ -186,7 +204,7 @@ static void onOutputStart(void* opaque, const StreamOutPipe::PipeHeader& header)
 
     gst_structure_set(video_structure, "width", G_TYPE_INT, header.videoWidth, NULL);
     gst_structure_set(video_structure, "height", G_TYPE_INT, header.videoHeight, NULL);
-    //gst_structure_set(video_structure, "framerate", GST_TYPE_FRACTION, header.videoFrameRateNum, header.videoFrameRateDen, NULL);
+    gst_structure_set(video_structure, "framerate", GST_TYPE_FRACTION, header.videoFrameRateNum, header.videoFrameRateDen, NULL);
 
     gst_base_src_set_caps(bsrc, caps);
 
@@ -240,8 +258,8 @@ static gboolean query(GstBaseSrc* bsrc, GstQuery* query)
 
             auto &header = self->outputHeader;
 
-            guint64 min = 3* gst_util_uint64_scale_ceil(GST_SECOND, header.videoFrameRateDen, header.videoFrameRateNum);
-            guint64 max = min * 2;
+            guint64 min = gst_util_uint64_scale_ceil(GST_SECOND, header.videoFrameRateDen, header.videoFrameRateNum);
+            guint64 max = min * VentuzVideoSrc::MAX_Q;
 
             gst_query_set_latency(query, TRUE, min, max);
             return TRUE;
@@ -335,6 +353,7 @@ static void ventuz_video_src_class_init(VentuzVideoSrcClass* klass)
     gobject_class->finalize = finalize;
 
     element_class->change_state = GST_DEBUG_FUNCPTR(change_state);
+    element_class->provide_clock = GST_DEBUG_FUNCPTR(provide_clock);
 
     basesrc_class->query = GST_DEBUG_FUNCPTR(query);
     basesrc_class->negotiate = NULL;
@@ -343,7 +362,6 @@ static void ventuz_video_src_class_init(VentuzVideoSrcClass* klass)
     basesrc_class->start = GST_DEBUG_FUNCPTR(start);
     basesrc_class->stop = GST_DEBUG_FUNCPTR(stop);
     basesrc_class->fixate = GST_DEBUG_FUNCPTR(fixate);
-
 
     pushsrc_class->create = GST_DEBUG_FUNCPTR(create);
 

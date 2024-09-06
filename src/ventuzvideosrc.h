@@ -7,9 +7,9 @@
 #include <gst/base/base.h>
 #include <gst/video/video.h>
 
-#include "streamoutpipe.h"
-
 #pragma warning (pop)
+
+#include "streamoutpipe.h"
 
 G_BEGIN_DECLS
 
@@ -35,6 +35,8 @@ struct VentuzVideoSrc
     GMutex lock;
     GQueue* frames;
     gint64 frameCount;
+
+    static const int MAX_Q = 5;
 };
 
 struct VentuzVideoSrcClass

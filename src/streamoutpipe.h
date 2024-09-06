@@ -5,6 +5,12 @@
 
 #include <gst/gst.h>
 
+struct GstVentuzClock
+{
+    GstSystemClock clock;
+    uint64_t refFrame;
+};
+
 namespace StreamOutPipe
 {
     struct PipeHeader
@@ -97,6 +103,7 @@ namespace StreamOutPipe
 
     typedef void (*OnStartFunc)(void* opaque, const PipeHeader& header);
     typedef void (*OnStopFunc)(void* opaque);
+    typedef void (*OnFrameFunc)(void* opaque, int64_t timecode, int frnum, int frDen);
     typedef void (*OnVideoFunc)(void* opaque, const uint8_t* data, size_t size, int64_t timecode, bool isIDR);
     typedef void (*OnAudioFunc)(void* opaque, const uint8_t* data, size_t size, int64_t timecode);
 
@@ -107,6 +114,7 @@ namespace StreamOutPipe
         PipeClient();
         ~PipeClient();
 
+        void SetOnFrame(OnFrameFunc func, void* opaque) { onFrame = func; onFrameOpaque = opaque; }
         void SetOnVideo(OnVideoFunc func, void* opaque) { onVideo = func; onVideoOpaque = opaque; }
         void SetOnAudio(OnAudioFunc func, void* opaque) { onAudio = func; onAudioOpaque = opaque; }
 
@@ -143,6 +151,8 @@ namespace StreamOutPipe
         void* onVideoOpaque = nullptr;
         OnAudioFunc onAudio = nullptr;
         void* onAudioOpaque = nullptr;
+        OnFrameFunc onFrame = nullptr;
+        void* onFrameOpaque = nullptr;
 
         PipeHeader header = {};       
 
@@ -150,8 +160,6 @@ namespace StreamOutPipe
 
         uint8_t* buffer = nullptr;
         size_t bufferSize = 0;
-        uint32_t lastFrameIndex = 0;
-        int64_t audioTc = -1;
 
         volatile uint32_t idrRequested = 0;
 
@@ -178,6 +186,12 @@ namespace StreamOutPipe
 
         void* Acquire(int output, const Callbacks& desc);
         void Release(int output, void**);
+
+        GstClock* GetClock() const { return (GstClock*)clk; }
+
+        GstClockTime GetVentuzTime() const { return time; }
+
+        GstClockTimeDiff GetTimeDiff(int64_t timeCode);
 
     private:
 
@@ -209,10 +223,20 @@ namespace StreamOutPipe
             static void OnAudioProxy(void* opaque, const uint8_t* data, size_t size, int64_t timecode)
             {
                 ((Output*)opaque)->OnAudio(data, size, timecode);
-            }           
+            }
         };
 
         Output outputs[MAX_OUTS] = {};
+        GstVentuzClock* clk = nullptr;
+
+        static void OnFrameProxy(void* opaque, int64_t timecode, int frNum, int frDen) { ((OutputManager*)opaque)->OnFrame(timecode, frNum, frDen); }
+
+        void OnFrame(int64_t timecode, int frNum, int frDen);
+
+        GMutex timeLock;
+        uint64_t lastTimeCode = 0;
+        GstClockTime time = 0;
+        GstClockTimeDiff dur = 0;
     };
 
 }

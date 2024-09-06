@@ -4,6 +4,51 @@
 #include <string.h>
 #include <stdio.h>
 
+#define GST_TYPE_VENTUZ_CLOCK (gst_ventuz_clock_get_type())
+#define GST_VENTUZ_CLOCK(obj) (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_VENTUZ_CLOCK,GstVentuzClock))
+#define GST_VENTUZ_CLOCK_CLASS(klass) (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_VENTUZ_CLOCK,GstVentuzClockClass))
+#define GST_IS_Ventuz_CLOCK(obj) (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_VENTUZ_CLOCK))
+#define GST_IS_Ventuz_CLOCK_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_VENTUZ_CLOCK))
+#define GST_VENTUZ_CLOCK_CAST(obj) ((GstVentuzClock*)(obj))
+
+
+struct GstVentuzClockClass
+{
+    GstSystemClockClass parent_class;
+};
+
+G_DEFINE_TYPE(GstVentuzClock, gst_ventuz_clock, GST_TYPE_SYSTEM_CLOCK);
+
+static GstClockTime gst_ventuz_clock_get_internal_time(GstClock* clock);
+
+static void gst_ventuz_clock_class_init(GstVentuzClockClass* klass)
+{
+    GstClockClass* clock_class = (GstClockClass*)klass;
+
+    clock_class->get_internal_time = gst_ventuz_clock_get_internal_time;
+}
+
+static void gst_ventuz_clock_init(GstVentuzClock* clock)
+{
+    GST_OBJECT_FLAG_SET(clock, GST_CLOCK_FLAG_CAN_SET_MASTER);
+}
+
+GstVentuzClock* gst_ventuz_clock_new(const gchar* name)
+{
+    GstVentuzClock* self =
+        GST_VENTUZ_CLOCK(g_object_new(GST_TYPE_VENTUZ_CLOCK, "name", name,
+            "clock-type", GST_CLOCK_TYPE_OTHER, NULL));
+
+    gst_object_ref_sink(self);
+
+    return self;
+}
+
+static GstClockTime gst_ventuz_clock_get_internal_time(GstClock* clock)
+{
+    return StreamOutPipe::OutputManager::Instance.GetVentuzTime();
+}
+
 namespace StreamOutPipe
 {
     PipeClient::PipeClient()
@@ -52,7 +97,6 @@ namespace StreamOutPipe
         if (!ReadStruct(header))
             return false;
 
-        audioTc = -1;
         idrRequested = 0;
         return true;
     }
@@ -86,24 +130,22 @@ namespace StreamOutPipe
         if (!ReadStruct(frameHeader))
             return false;
 
+        if (onFrame)
+            onFrame(onFrameOpaque, frameHeader.frameIndex, header.videoFrameRateNum, header.videoFrameRateDen);
+
         if (!ReadStruct(chunk) || chunk.fourCC != 'fvid')
             return false;
         ReadBuffer(chunk.size);
         if (onVideo)
-            onVideo(onVideoOpaque, buffer, chunk.size, frameHeader.frameIndex, !!(frameHeader.flags & FrameHeader::IDR_FRAME) );
+            onVideo(onVideoOpaque, buffer, chunk.size, frameHeader.frameIndex, !!(frameHeader.flags & FrameHeader::IDR_FRAME));
 
         if (!ReadStruct(chunk) || chunk.fourCC != 'faud')
             return false;
         ReadBuffer(chunk.size);
-        if (audioTc < 0 || frameHeader.frameIndex != lastFrameIndex + 1)
-            audioTc = (int64_t)frameHeader.frameIndex * header.audioRate * header.videoFrameRateDen / header.videoFrameRateNum;
-            if (onAudio)
-                onAudio(onAudioOpaque, buffer, chunk.size, audioTc);
+        if (onAudio)
+            onAudio(onAudioOpaque, buffer, chunk.size, frameHeader.frameIndex);
 
-            audioTc += (int64_t)chunk.size / (2ll * header.audioChannels);
-            lastFrameIndex = frameHeader.frameIndex;
-
-            return true;
+        return true;
     }
 
     void PipeClient::Ensure(size_t size)
@@ -147,7 +189,11 @@ namespace StreamOutPipe
             g_mutex_init(&outputs[i].nodeLock);
             outputs[i].client.SetOnAudio(Output::OnAudioProxy, &outputs[i]);
             outputs[i].client.SetOnVideo(Output::OnVideoProxy, &outputs[i]);
+            outputs[i].client.SetOnFrame(OnFrameProxy, this);
         }
+
+        clk = gst_ventuz_clock_new("VentuzOutputClock");
+        g_mutex_init(&timeLock);
     }
 
     OutputManager::~OutputManager()
@@ -160,6 +206,7 @@ namespace StreamOutPipe
                 delete (Callbacks*)n->data;
             g_list_free(outputs[i].nodes);
         }
+        g_mutex_clear(&timeLock);
     }
 
     gpointer OutputManager::Output::ThreadFunc()
@@ -288,6 +335,28 @@ namespace StreamOutPipe
         }
 
         g_mutex_unlock(&out.threadLock);
+    }
+
+    void OutputManager::OnFrame(int64_t timeCode, int frNum, int frDen)
+    {
+        g_mutex_lock(&timeLock);
+
+        if (timeCode != lastTimeCode)
+        {
+            dur = GST_SECOND * frDen / frNum;
+            time += dur;
+            lastTimeCode = timeCode;
+        }
+
+        g_mutex_unlock(&timeLock);
+    }
+
+    GstClockTimeDiff OutputManager::GetTimeDiff(int64_t timeCode)
+    {
+        g_mutex_lock(&timeLock);
+        GstClockTimeDiff diff = dur * (timeCode - lastTimeCode);
+        g_mutex_unlock(&timeLock);
+        return diff;
     }
 }
 
