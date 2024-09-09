@@ -102,7 +102,7 @@ static void ventuz_audio_src_init(VentuzAudioSrc* self)
     g_mutex_init(&self->lock);
     g_cond_init(&self->cond);
 
-    //GST_OBJECT_FLAG_SET(self, GST_ELEMENT_FLAG_PROVIDE_CLOCK);
+    GST_OBJECT_FLAG_SET(self, GST_ELEMENT_FLAG_PROVIDE_CLOCK);
     GST_OBJECT_FLAG_SET(self, GST_ELEMENT_FLAG_REQUIRE_CLOCK);
 }
 
@@ -148,13 +148,12 @@ static void ventuz_audio_src_finalize(GObject* object)
     g_cond_clear(&self->cond);
 }
 
-/*
 static GstClock* ventuz_audio_src_provide_clock(GstElement* elem)
 {
-    return StreamOutPipe::OutputManager::Instance.GetClock();
+    GstClock *clock = StreamOutPipe::OutputManager::Instance.GetClock();
+    gst_object_ref_sink(clock);
+    return clock;
 }
-*/
-
 
 static gboolean ventuz_audio_src_query(GstBaseSrc* bsrc, GstQuery* query)
 {
@@ -287,7 +286,7 @@ static void ventuz_audio_src_class_init(VentuzAudioSrcClass* klass)
     gobject_class->get_property = ventuz_audio_src_get_property;
     gobject_class->finalize = ventuz_audio_src_finalize;
 
-    //element_class->provide_clock = GST_DEBUG_FUNCPTR(ventuz_audio_src_provide_clock);
+    element_class->provide_clock = GST_DEBUG_FUNCPTR(ventuz_audio_src_provide_clock);
 
     basesrc_class->negotiate = NULL;
     basesrc_class->query = GST_DEBUG_FUNCPTR(ventuz_audio_src_query);

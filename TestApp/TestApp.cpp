@@ -1,5 +1,5 @@
 #include <gst/gst.h>
-
+#include <glib/gstdio.h>
 static gboolean bus_call(GstBus* bus, GstMessage* msg, gpointer data)
 {
     GMainLoop* loop = (GMainLoop*)data;
@@ -34,55 +34,50 @@ static gboolean bus_call(GstBus* bus, GstMessage* msg, gpointer data)
 }
 
 gint main(gint argc, gchar* argv[])
-{
-    GstStateChangeReturn ret;
-    GstElement* pipeline, * sink, * src, * dec, * parse, * mux, * q, * asrc, * aenc;
-    GMainLoop* loop;
-    GstBus* bus;
-    guint watch_id;
-
+{   
     /* initialization */
     gst_init(&argc, &argv);
-    loop = g_main_loop_new(NULL, FALSE);
-   
 
+    // point plugin scanner to our output dir
+    const char *exe_dir = g_win32_get_package_installation_directory_of_module(NULL);
+    gst_registry_scan_path(gst_registry_get(), exe_dir);
+
+    GMainLoop* loop = g_main_loop_new(NULL, FALSE);
+   
     /* create elements */
-    pipeline = gst_pipeline_new("my_pipeline");
+    GstElement* pipeline = gst_pipeline_new("my_pipeline");
 
     /* watch for messages on the pipeline's bus (note that this will only
      * work like this when a GLib main loop is running) */
-    bus = gst_pipeline_get_bus(GST_PIPELINE(pipeline));
-    watch_id = gst_bus_add_watch(bus, bus_call, loop);
+    GstBus* bus = gst_pipeline_get_bus(GST_PIPELINE(pipeline));
+    guint watch_id = gst_bus_add_watch(bus, bus_call, loop);
     gst_object_unref(bus);
 
-    src = gst_element_factory_make("ventuzvideosrc", "src");
-    asrc = gst_element_factory_make("ventuzaudiosrc", "asrc");
-    //dec = gst_element_factory_make("openh264dec", "dec");
+    // Let's get some video and audio from Ventuz, 
+    // mux it as mpeg-ts with Opus audio, 
+    // and send it out over SRT
 
-    aenc = gst_element_factory_make("opusenc", "aenc");
-    g_object_set(aenc, "bitrate", "64000", NULL);
+    GstElement* src = gst_element_factory_make("ventuzvideosrc", "src");
+    GstElement* asrc = gst_element_factory_make("ventuzaudiosrc", "asrc");
 
-    mux = gst_element_factory_make("mpegtsmux", "mux");
-    sink = gst_element_factory_make("srtsink", "sink");
-    q = gst_element_factory_make("queue", "q");
+    GstElement* aenc = gst_element_factory_make("opusenc", "aenc");
+    g_object_set(aenc, "bitrate", "128000", NULL);
 
+    GstElement* mux = gst_element_factory_make("mpegtsmux", "mux");
+    GstElement* q = gst_element_factory_make("queue", "q");
+
+    GstElement* sink = gst_element_factory_make("srtsink", "sink");
     g_object_set(sink, "uri", "srt://localhost:10001", NULL);
     
-
-    if (!src || !sink) {
+    if (!src || !sink || !asrc || !aenc || !mux || !q) {
         g_print("Elements not found\n");
         return -1;
     }
   
-    //    sink = gst_element_factory_make("autovideosink", "sink");
-    //sink = gst_element_factory_make("filesink", "sink");
-    //g_object_set(sink, "location", "c:\\temp\\test.ts", NULL);
-
-
-    gst_bin_add_many(GST_BIN(pipeline), src, asrc, aenc, mux, sink, NULL);
+    gst_bin_add_many(GST_BIN(pipeline), src, asrc, aenc, mux, q, sink, NULL);
 
     /* link everything together */
-    if (!gst_element_link_many(src, mux, sink, NULL)) {
+    if (!gst_element_link_many(src, mux, q, sink, NULL)) {
         g_print("Failed to link one or more elements!\n");
         return -1;
     }
@@ -94,7 +89,7 @@ gint main(gint argc, gchar* argv[])
     }
 
     /* run */
-    ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
+    GstStateChangeReturn ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
     if (ret == GST_STATE_CHANGE_FAILURE) {
         GstMessage* msg;
 

@@ -131,7 +131,9 @@ static void ventuz_video_src_finalize(GObject* object)
 
 static GstClock* ventuz_video_src_provide_clock(GstElement* elem)
 {
-    return StreamOutPipe::OutputManager::Instance.GetClock();
+    GstClock* clock = StreamOutPipe::OutputManager::Instance.GetClock();
+    gst_object_ref_sink(clock);
+    return clock;
 }
 
 
@@ -262,7 +264,7 @@ static GstFlowReturn ventuz_video_src_create(GstPushSrc* psrc, GstBuffer** buffe
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(psrc);
     GstFlowReturn flow_ret = GST_FLOW_ERROR;
-
+     
     g_mutex_lock(&self->lock);
     for (;;)
     {
