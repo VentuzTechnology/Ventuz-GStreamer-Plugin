@@ -51,7 +51,7 @@ static void ventuz_video_src_on_video(void* opaque, const uint8_t* data, size_t 
     GstElement* elem = GST_ELEMENT(opaque);
     GstBaseSrc* base = GST_BASE_SRC(opaque);
 
-    GstBuffer *buffer = gst_buffer_new_memdup(data, size);
+    GstBuffer* buffer = gst_buffer_new_memdup(data, size);
 
     // timestamps
     auto& header = self->outputHeader;
@@ -100,7 +100,8 @@ static void ventuz_video_src_get_property(GObject* object, guint property_id, GV
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(object);
 
-    switch (property_id) {
+    switch (property_id)
+    {
     case PROP_OUTPUT_NUMBER:
         g_value_set_int(value, self->outputNumber);
         break;
@@ -111,7 +112,8 @@ static void ventuz_video_src_set_property(GObject* object, guint property_id, co
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(object);
 
-    switch (property_id) {
+    switch (property_id)
+    {
     case PROP_OUTPUT_NUMBER:
         self->outputNumber = g_value_get_int(value);
         break;
@@ -127,7 +129,7 @@ static void ventuz_video_src_finalize(GObject* object)
     g_cond_clear(&self->cond);
 }
 
-static GstClock* ventuz_video_src_provide_clock(GstElement *elem)
+static GstClock* ventuz_video_src_provide_clock(GstElement* elem)
 {
     return StreamOutPipe::OutputManager::Instance.GetClock();
 }
@@ -146,7 +148,7 @@ static void ventuz_video_src_output_start(void* opaque, const StreamOutPipe::Pip
     {
     case 'h264': caps = gst_caps_new_simple("video/x-h264", NULL); break;
     case 'hevc': caps = gst_caps_new_simple("video/x-h265", NULL); break;
-    default:  
+    default:
         // TODO: some error
         return;
     }
@@ -175,14 +177,14 @@ static void ventuz_video_src_output_stop(void* opaque)
 static gboolean ventuz_video_src_start(GstBaseSrc* bsrc)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
-    
+
     self->gotIDR = false;
     self->outputHandle = StreamOutPipe::OutputManager::Instance.Acquire(self->outputNumber, {
         .opaque = bsrc,
         .onStart = ventuz_video_src_output_start,
         .onStop = ventuz_video_src_output_stop,
         .onVideo = ventuz_video_src_on_video,
-    }),
+        });
 
     gst_base_src_start_complete(bsrc, GST_FLOW_OK);
 
@@ -205,23 +207,21 @@ static gboolean ventuz_video_src_query(GstBaseSrc* bsrc, GstQuery* query)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
 
-    switch (GST_QUERY_TYPE(query)) {
-    case GST_QUERY_LATENCY: {
-        if (self->outputHeader.videoFrameRateDen) {
-
-            auto &header = self->outputHeader;
+    switch (GST_QUERY_TYPE(query))
+    {
+    case GST_QUERY_LATENCY: 
+        if (self->outputHeader.videoFrameRateDen)
+        {
+            auto& header = self->outputHeader;
 
             guint64 min = gst_util_uint64_scale_ceil(GST_SECOND, header.videoFrameRateDen, header.videoFrameRateNum);
             guint64 max = min * VentuzVideoSrc::MAX_Q;
 
             gst_query_set_latency(query, TRUE, min, max);
             return TRUE;
-        }
-        else
-            return FALSE;
-
         return FALSE;
-    }
+        }      
+    
     default:
         return GST_BASE_SRC_CLASS(parent_class)->query(bsrc, query);
     }
@@ -291,15 +291,14 @@ static void ventuz_video_src_class_init(VentuzVideoSrcClass* klass)
 
     GObjectClass* gobject_class = G_OBJECT_CLASS(klass);
     GstElementClass* element_class = GST_ELEMENT_CLASS(klass);
-    GstBaseSrcClass* basesrc_class = GST_BASE_SRC_CLASS(klass);
     GstPushSrcClass* pushsrc_class = GST_PUSH_SRC_CLASS(klass);
+    GstBaseSrcClass* basesrc_class = GST_BASE_SRC_CLASS(klass);
 
     gst_element_class_set_static_metadata(element_class,
         "Ventuz Stream Out video source",
         "Source/Video",
         "Receives the video stream from a Ventuz Stream Out output",
-        "Ventuz Technology <your.name@your.isp>");
-
+        "Ventuz Technology <tammo.hinrichs@ventuz.com>");
 
     gobject_class->set_property = ventuz_video_src_set_property;
     gobject_class->get_property = ventuz_video_src_get_property;
@@ -324,4 +323,4 @@ static void ventuz_video_src_class_init(VentuzVideoSrcClass* klass)
     gst_element_class_add_static_pad_template(element_class, &src_template);
 }
 
-GST_ELEMENT_REGISTER_DEFINE(ventuzvideosrc, "ventuzvideosrc", GST_RANK_NONE,  GST_TYPE_VENTUZ_VIDEO_SRC);
+GST_ELEMENT_REGISTER_DEFINE(ventuzvideosrc, "ventuzvideosrc", GST_RANK_NONE, GST_TYPE_VENTUZ_VIDEO_SRC);

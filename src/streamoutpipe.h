@@ -5,7 +5,7 @@
 
 #include <gst/gst.h>
 
-struct GstVentuzClock
+struct VentuzClock
 {
     GstSystemClock clock;
     uint64_t refFrame;
@@ -227,7 +227,7 @@ namespace StreamOutPipe
         };
 
         Output outputs[MAX_OUTS] = {};
-        GstVentuzClock* clk = nullptr;
+        VentuzClock* clk = nullptr;
 
         static void OnFrameProxy(void* opaque, int64_t timecode, int frNum, int frDen) { ((OutputManager*)opaque)->OnFrame(timecode, frNum, frDen); }
 

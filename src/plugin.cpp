@@ -1,5 +1,6 @@
 
 #include <gst/gst.h>
+#include "ventuzaudiosrc.h"
 #include "ventuzvideosrc.h"
 
 GST_DEBUG_CATEGORY_STATIC(gst_ventuzplugin_debug);
@@ -18,9 +19,10 @@ static gboolean plugin_init(GstPlugin* plugin)
     GST_DEBUG_CATEGORY_INIT(gst_ventuzplugin_debug, "ventuzplugin",
         0, "Ventuz plugin");
 
-    auto ret = GST_ELEMENT_REGISTER(ventuzvideosrc, plugin);
+    gboolean ret = GST_ELEMENT_REGISTER(ventuzvideosrc, plugin);
+    ret &= GST_ELEMENT_REGISTER(ventuzaudiosrc, plugin);
 
-    return TRUE;
+    return ret;
 }
 
 /* PACKAGE: this is usually set by meson depending on some _INIT macro

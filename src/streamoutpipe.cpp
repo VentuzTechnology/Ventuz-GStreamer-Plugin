@@ -4,38 +4,33 @@
 #include <string.h>
 #include <stdio.h>
 
-#define GST_TYPE_VENTUZ_CLOCK (gst_ventuz_clock_get_type())
-#define GST_VENTUZ_CLOCK(obj) (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_VENTUZ_CLOCK,GstVentuzClock))
-#define GST_VENTUZ_CLOCK_CLASS(klass) (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_VENTUZ_CLOCK,GstVentuzClockClass))
-#define GST_IS_Ventuz_CLOCK(obj) (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_VENTUZ_CLOCK))
-#define GST_IS_Ventuz_CLOCK_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_VENTUZ_CLOCK))
-#define GST_VENTUZ_CLOCK_CAST(obj) ((GstVentuzClock*)(obj))
+#define GST_TYPE_VENTUZ_CLOCK (ventuz_clock_get_type())
+#define GST_VENTUZ_CLOCK(obj) (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_VENTUZ_CLOCK,VentuzClock))
 
-
-struct GstVentuzClockClass
+struct VentuzClockClass
 {
     GstSystemClockClass parent_class;
 };
 
-G_DEFINE_TYPE(GstVentuzClock, gst_ventuz_clock, GST_TYPE_SYSTEM_CLOCK);
+G_DEFINE_TYPE(VentuzClock, ventuz_clock, GST_TYPE_SYSTEM_CLOCK);
 
-static GstClockTime gst_ventuz_clock_get_internal_time(GstClock* clock);
+static GstClockTime ventuz_clock_get_internal_time(GstClock* clock);
 
-static void gst_ventuz_clock_class_init(GstVentuzClockClass* klass)
+static void ventuz_clock_class_init(VentuzClockClass* klass)
 {
     GstClockClass* clock_class = (GstClockClass*)klass;
 
-    clock_class->get_internal_time = gst_ventuz_clock_get_internal_time;
+    clock_class->get_internal_time = ventuz_clock_get_internal_time;
 }
 
-static void gst_ventuz_clock_init(GstVentuzClock* clock)
+static void ventuz_clock_init(VentuzClock* clock)
 {
     GST_OBJECT_FLAG_SET(clock, GST_CLOCK_FLAG_CAN_SET_MASTER);
 }
 
-GstVentuzClock* gst_ventuz_clock_new(const gchar* name)
+VentuzClock* ventuz_clock_new(const gchar* name)
 {
-    GstVentuzClock* self =
+    VentuzClock* self =
         GST_VENTUZ_CLOCK(g_object_new(GST_TYPE_VENTUZ_CLOCK, "name", name,
             "clock-type", GST_CLOCK_TYPE_OTHER, NULL));
 
@@ -44,7 +39,7 @@ GstVentuzClock* gst_ventuz_clock_new(const gchar* name)
     return self;
 }
 
-static GstClockTime gst_ventuz_clock_get_internal_time(GstClock* clock)
+static GstClockTime ventuz_clock_get_internal_time(GstClock* clock)
 {
     return StreamOutPipe::OutputManager::Instance.GetVentuzTime();
 }
@@ -57,7 +52,7 @@ namespace StreamOutPipe
     }
 
     PipeClient::~PipeClient()
-    {     
+    {
         Close();
         delete[] buffer;
     }
@@ -77,7 +72,7 @@ namespace StreamOutPipe
                 break;
 
             DWORD err = GetLastError();
-           
+
             if (err != ERROR_PIPE_BUSY)
             {
                 return false;
@@ -90,7 +85,7 @@ namespace StreamOutPipe
 
         if (!ReadStruct(chunk))
             return false;
-        
+
         if (chunk.fourCC != 'VVSP')
             return false;
 
@@ -192,7 +187,7 @@ namespace StreamOutPipe
             outputs[i].client.SetOnFrame(OnFrameProxy, this);
         }
 
-        clk = gst_ventuz_clock_new("VentuzOutputClock");
+        clk = ventuz_clock_new("VentuzOutputClock");
         g_mutex_init(&timeLock);
     }
 
@@ -217,10 +212,10 @@ namespace StreamOutPipe
             if (!client.IsOpen())
             {
                 if (client.Open(outputNo))
-                {                    
+                {
                     g_mutex_lock(&nodeLock);
-                
-                    for (GList *n = nodes; n; n=n->next)
+
+                    for (GList* n = nodes; n; n = n->next)
                     {
                         Callbacks* desc = (Callbacks*)n->data;
                         if (desc->onStart) desc->onStart(desc->opaque, client.GetHeader());
@@ -292,6 +287,10 @@ namespace StreamOutPipe
         g_mutex_lock(&out.nodeLock);
         Callbacks* node = new Callbacks(desc);
         out.nodes = g_list_append(out.nodes, node);
+
+        if (out.client.IsOpen() && node->onStart)
+            node->onStart(node->opaque, out.client.GetHeader());
+            
         g_mutex_unlock(&out.nodeLock);
 
         if (!out.thread)
@@ -341,7 +340,8 @@ namespace StreamOutPipe
     {
         g_mutex_lock(&timeLock);
 
-        if (timeCode != lastTimeCode)
+        int64_t delta = timeCode - lastTimeCode;
+        if (delta<-100 || delta>0)
         {
             dur = GST_SECOND * frDen / frNum;
             time += dur;

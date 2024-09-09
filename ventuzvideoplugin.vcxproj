@@ -98,10 +98,12 @@
     <ClCompile Include="src\dllmain.cpp" />
     <ClCompile Include="src\plugin.cpp" />
     <ClCompile Include="src\streamoutpipe.cpp" />
+    <ClCompile Include="src\ventuzaudiosrc.cpp" />
     <ClCompile Include="src\ventuzvideosrc.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\streamoutpipe.h" />
+    <ClInclude Include="src\ventuzaudiosrc.h" />
     <ClInclude Include="src\ventuzvideosrc.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
