@@ -26,7 +26,7 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE("src",
         "profile = main, "
         "framerate = " GST_VIDEO_FPS_RANGE "; "
 
-        "video/x-hevc, "
+        "video/x-h265, "
         "stream-format = byte-stream, "
         "width = " GST_VIDEO_SIZE_RANGE ", "
         "height = " GST_VIDEO_SIZE_RANGE ", "
@@ -35,7 +35,7 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE("src",
     )
 );
 
-static void OnVideo(void* opaque, const uint8_t* data, size_t size, int64_t timecode, bool isIDR)
+static void ventuz_video_src_on_video(void* opaque, const uint8_t* data, size_t size, int64_t timecode, bool isIDR)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(opaque);
 
@@ -56,12 +56,15 @@ static void OnVideo(void* opaque, const uint8_t* data, size_t size, int64_t time
     // timestamps
     auto& header = self->outputHeader;
     GstClockTimeDiff dur = GST_SECOND * header.videoFrameRateDen / header.videoFrameRateNum;
-    GstClock* clock = gst_element_get_clock(GST_ELEMENT(self));
-    GstClockTime baseTime = gst_element_get_base_time(GST_ELEMENT(self));
     GST_BUFFER_DURATION(buffer) = dur;
-    GST_BUFFER_TIMESTAMP(buffer) = gst_clock_get_time(clock) + StreamOutPipe::OutputManager::Instance.GetTimeDiff(timecode) - baseTime;
-    gst_object_unref(clock);
-    self->frameCount++;
+
+    GstClock* clock = gst_element_get_clock(GST_ELEMENT(self));
+    if (clock)
+    {
+        GstClockTime baseTime = gst_element_get_base_time(GST_ELEMENT(self));
+        GST_BUFFER_TIMESTAMP(buffer) = gst_clock_get_time(clock) + StreamOutPipe::OutputManager::Instance.GetTimeDiff(timecode) - baseTime;
+        gst_object_unref(clock);
+    }
 
     g_mutex_lock(&self->lock);
 
@@ -72,15 +75,14 @@ static void OnVideo(void* opaque, const uint8_t* data, size_t size, int64_t time
     }
     else
         gst_buffer_unref(buffer);
-    g_mutex_unlock(&self->lock);
 
+    g_mutex_unlock(&self->lock);
 }
 
 static void ventuz_video_src_init(VentuzVideoSrc* self)
 {
     self->outputNumber = 0;
     self->flushing = false;
-    self->frameCount = 0;
     self->gotIDR = false;
     self->frames = g_queue_new();
 
@@ -91,9 +93,10 @@ static void ventuz_video_src_init(VentuzVideoSrc* self)
     g_cond_init(&self->cond);
 
     GST_OBJECT_FLAG_SET(self, GST_ELEMENT_FLAG_PROVIDE_CLOCK);
+    GST_OBJECT_FLAG_SET(self, GST_ELEMENT_FLAG_REQUIRE_CLOCK);
 }
 
-static void get_property(GObject* object, guint property_id, GValue* value, GParamSpec* pspec)
+static void ventuz_video_src_get_property(GObject* object, guint property_id, GValue* value, GParamSpec* pspec)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(object);
 
@@ -104,7 +107,7 @@ static void get_property(GObject* object, guint property_id, GValue* value, GPar
     }
 }
 
-static void set_property(GObject* object, guint property_id, const GValue* value, GParamSpec* pspec)
+static void ventuz_video_src_set_property(GObject* object, guint property_id, const GValue* value, GParamSpec* pspec)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(object);
 
@@ -116,7 +119,7 @@ static void set_property(GObject* object, guint property_id, const GValue* value
 
 }
 
-static void finalize(GObject* object)
+static void ventuz_video_src_finalize(GObject* object)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(object);
 
@@ -124,61 +127,13 @@ static void finalize(GObject* object)
     g_cond_clear(&self->cond);
 }
 
-static GstStateChangeReturn change_state(GstElement* element, GstStateChange transition)
-{
-    VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(element);
-    GstStateChangeReturn ret = GST_STATE_CHANGE_SUCCESS;
-
-    switch (transition) {
-    case GST_STATE_CHANGE_NULL_TO_READY:
-        break;
-    case GST_STATE_CHANGE_READY_TO_PAUSED:
-        ret = GST_STATE_CHANGE_NO_PREROLL;
-        break;
-    default:
-        break;
-    }
-
-    if (ret == GST_STATE_CHANGE_FAILURE)
-        return ret;
-    ret = GST_ELEMENT_CLASS(parent_class)->change_state(element, transition);
-    if (ret == GST_STATE_CHANGE_FAILURE)
-        return ret;
-
-    switch (transition) {
-    case GST_STATE_CHANGE_PAUSED_TO_READY:
-        break;
-    case GST_STATE_CHANGE_PLAYING_TO_PAUSED: {
-
-        GST_DEBUG_OBJECT(self, "Stopping streams");
-        ret = GST_STATE_CHANGE_NO_PREROLL;
-
-        break;
-    }
-    case GST_STATE_CHANGE_PAUSED_TO_PLAYING: {
-        break;
-    }
-    case GST_STATE_CHANGE_READY_TO_NULL:
-        break;
-
-    default:
-        break;
-    }
-
-    return ret;
-}
-
-static GstClock* provide_clock(GstElement *elem)
+static GstClock* ventuz_video_src_provide_clock(GstElement *elem)
 {
     return StreamOutPipe::OutputManager::Instance.GetClock();
 }
 
-static GstCaps* fixate(GstBaseSrc* src, GstCaps* caps)
-{
-    return caps;
-}
 
-static void onOutputStart(void* opaque, const StreamOutPipe::PipeHeader& header)
+static void ventuz_video_src_output_start(void* opaque, const StreamOutPipe::PipeHeader& header)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(opaque);
     GstBaseSrc* bsrc = GST_BASE_SRC(opaque);
@@ -190,7 +145,7 @@ static void onOutputStart(void* opaque, const StreamOutPipe::PipeHeader& header)
     switch (header.videoCodecFourCC)
     {
     case 'h264': caps = gst_caps_new_simple("video/x-h264", NULL); break;
-    case 'hevc': caps = gst_caps_new_simple("video/x-hevc", NULL); break;
+    case 'hevc': caps = gst_caps_new_simple("video/x-h265", NULL); break;
     default:  
         // TODO: some error
         return;
@@ -209,26 +164,24 @@ static void onOutputStart(void* opaque, const StreamOutPipe::PipeHeader& header)
     gst_base_src_set_caps(bsrc, caps);
 
     gst_caps_unref(caps);
-
-    self->frameCount = 0;
 }
 
-static void onOutputStop(void* opaque)
+static void ventuz_video_src_output_stop(void* opaque)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(opaque);
     GstBaseSrc* bsrc = GST_BASE_SRC(opaque);
 }
 
-static gboolean start(GstBaseSrc* bsrc)
+static gboolean ventuz_video_src_start(GstBaseSrc* bsrc)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
     
     self->gotIDR = false;
     self->outputHandle = StreamOutPipe::OutputManager::Instance.Acquire(self->outputNumber, {
         .opaque = bsrc,
-        .onStart = onOutputStart,
-        .onStop = onOutputStop,
-        .onVideo = OnVideo,
+        .onStart = ventuz_video_src_output_start,
+        .onStop = ventuz_video_src_output_stop,
+        .onVideo = ventuz_video_src_on_video,
     }),
 
     gst_base_src_start_complete(bsrc, GST_FLOW_OK);
@@ -236,7 +189,7 @@ static gboolean start(GstBaseSrc* bsrc)
     return TRUE;
 }
 
-static gboolean stop(GstBaseSrc* bsrc)
+static gboolean ventuz_video_src_stop(GstBaseSrc* bsrc)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
 
@@ -248,13 +201,13 @@ static gboolean stop(GstBaseSrc* bsrc)
     return TRUE;
 }
 
-static gboolean query(GstBaseSrc* bsrc, GstQuery* query)
+static gboolean ventuz_video_src_query(GstBaseSrc* bsrc, GstQuery* query)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
 
     switch (GST_QUERY_TYPE(query)) {
     case GST_QUERY_LATENCY: {
-        if (self->outputHandle) {
+        if (self->outputHeader.videoFrameRateDen) {
 
             auto &header = self->outputHeader;
 
@@ -274,7 +227,7 @@ static gboolean query(GstBaseSrc* bsrc, GstQuery* query)
     }
 }
 
-static gboolean unlock(GstBaseSrc* bsrc)
+static gboolean ventuz_video_src_unlock(GstBaseSrc* bsrc)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
 
@@ -286,7 +239,7 @@ static gboolean unlock(GstBaseSrc* bsrc)
     return TRUE;
 }
 
-static gboolean unlock_stop(GstBaseSrc* bsrc)
+static gboolean ventuz_video_src_unlock_stop(GstBaseSrc* bsrc)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(bsrc);
 
@@ -305,7 +258,7 @@ static gboolean unlock_stop(GstBaseSrc* bsrc)
     return TRUE;
 }
 
-static GstFlowReturn create(GstPushSrc* psrc, GstBuffer** buffer)
+static GstFlowReturn ventuz_video_src_create(GstPushSrc* psrc, GstBuffer** buffer)
 {
     VentuzVideoSrc* self = VENTUZ_VIDEO_SRC_CAST(psrc);
     GstFlowReturn flow_ret = GST_FLOW_ERROR;
@@ -348,22 +301,20 @@ static void ventuz_video_src_class_init(VentuzVideoSrcClass* klass)
         "Ventuz Technology <your.name@your.isp>");
 
 
-    gobject_class->set_property = set_property;
-    gobject_class->get_property = get_property;
-    gobject_class->finalize = finalize;
+    gobject_class->set_property = ventuz_video_src_set_property;
+    gobject_class->get_property = ventuz_video_src_get_property;
+    gobject_class->finalize = ventuz_video_src_finalize;
 
-    element_class->change_state = GST_DEBUG_FUNCPTR(change_state);
-    element_class->provide_clock = GST_DEBUG_FUNCPTR(provide_clock);
+    element_class->provide_clock = GST_DEBUG_FUNCPTR(ventuz_video_src_provide_clock);
 
-    basesrc_class->query = GST_DEBUG_FUNCPTR(query);
     basesrc_class->negotiate = NULL;
-    basesrc_class->unlock = GST_DEBUG_FUNCPTR(unlock);
-    basesrc_class->unlock_stop = GST_DEBUG_FUNCPTR(unlock_stop);
-    basesrc_class->start = GST_DEBUG_FUNCPTR(start);
-    basesrc_class->stop = GST_DEBUG_FUNCPTR(stop);
-    basesrc_class->fixate = GST_DEBUG_FUNCPTR(fixate);
+    basesrc_class->query = GST_DEBUG_FUNCPTR(ventuz_video_src_query);
+    basesrc_class->unlock = GST_DEBUG_FUNCPTR(ventuz_video_src_unlock);
+    basesrc_class->unlock_stop = GST_DEBUG_FUNCPTR(ventuz_video_src_unlock_stop);
+    basesrc_class->start = GST_DEBUG_FUNCPTR(ventuz_video_src_start);
+    basesrc_class->stop = GST_DEBUG_FUNCPTR(ventuz_video_src_stop);
 
-    pushsrc_class->create = GST_DEBUG_FUNCPTR(create);
+    pushsrc_class->create = GST_DEBUG_FUNCPTR(ventuz_video_src_create);
 
     g_object_class_install_property(gobject_class, PROP_OUTPUT_NUMBER,
         g_param_spec_int("output-number", "Output number",

@@ -34,7 +34,6 @@ struct VentuzVideoSrc
     GCond cond;
     GMutex lock;
     GQueue* frames;
-    gint64 frameCount;
 
     static const int MAX_Q = 5;
 };

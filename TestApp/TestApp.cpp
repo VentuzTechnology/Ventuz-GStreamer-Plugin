@@ -56,13 +56,13 @@ gint main(gint argc, gchar* argv[])
     gst_object_unref(bus);
 
     src = gst_element_factory_make("ventuzvideosrc", "src");
-    dec = gst_element_factory_make("openh264dec", "dec");
-//    mux = gst_element_factory_make("tsmux", "mux");
-    //sink = gst_element_factory_make("srtsink", "sink");
+    //dec = gst_element_factory_make("openh264dec", "dec");
+    mux = gst_element_factory_make("mpegtsmux", "mux");
+    sink = gst_element_factory_make("srtsink", "sink");
 
-    //g_object_set(sink, "uri", "srt://localhost:10001", NULL);
+    g_object_set(sink, "uri", "srt://localhost:10001", NULL);
 
-    sink = gst_element_factory_make("autovideosink", "sink");
+    //sink = gst_element_factory_make("autovideosink", "sink");
 
     if (!src || !sink) {
         g_print("Elements not found\n");
@@ -70,13 +70,17 @@ gint main(gint argc, gchar* argv[])
     }
    
 
+    //sink = gst_element_factory_make("filesink", "sink");
+    //g_object_set(sink, "location", "c:\\temp\\test.ts", NULL);
+
+
     //g_object_set(G_OBJECT(filesrc), "location", argv[1], NULL);
 
 
-    gst_bin_add_many(GST_BIN(pipeline), src, dec, sink, NULL);
+    gst_bin_add_many(GST_BIN(pipeline), src, mux, sink, NULL);
 
     /* link everything together */
-    if (!gst_element_link_many(src,  dec, sink, NULL)) {
+    if (!gst_element_link_many(src, mux, sink, NULL)) {
         g_print("Failed to link one or more elements!\n");
         return -1;
     }
