@@ -1,5 +1,23 @@
-#include "ventuzaudiosrc.h"
+/* Ventuz GStreamer plugin
+ * Copyright (C) 2024 Ventuz Technology <tammo.hinrichs@ventuz.com>
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public
+ * License along with this library; if not, write to the
+ * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
+#include "ventuzaudiosrc.h"
 
 GST_DEBUG_CATEGORY_STATIC(gst_ventuz_audio_src_debug);
 #define GST_CAT_DEFAULT gst_ventuz_audio_src_debug
@@ -16,7 +34,7 @@ enum
 static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE("src",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS("audio/x-raw, format=S16LE, channels=2, rate=48000, layout=interleaved;")
+    GST_STATIC_CAPS("audio/x-raw, format=(string)S16LE, channels=(int)2, rate=(int)48000, layout=(string)interleaved, channel-mask=(bitmask)0x3")
 );
 
 
@@ -43,6 +61,7 @@ static void ventuz_audio_src_output_start(void* opaque, const StreamOutPipe::Pip
     gst_structure_set(audio_structure, "layout", G_TYPE_STRING, "interleaved", NULL);
     gst_structure_set(audio_structure, "channels", G_TYPE_INT, header.audioChannels, NULL);
     gst_structure_set(audio_structure, "rate", G_TYPE_INT, header.audioRate, NULL);
+    gst_structure_set(audio_structure, "channel-mask", GST_TYPE_BITMASK, 3, NULL);
 
     gst_base_src_set_caps(bsrc, caps);
 

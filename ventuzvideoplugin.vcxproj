@@ -95,7 +95,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src\dllmain.cpp" />
     <ClCompile Include="src\plugin.cpp" />
     <ClCompile Include="src\streamoutpipe.cpp" />
     <ClCompile Include="src\ventuzaudiosrc.cpp" />

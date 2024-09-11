@@ -1,11 +1,33 @@
+/* Ventuz GStreamer plugin
+ * Copyright (C) 2024 Ventuz Technology <tammo.hinrichs@ventuz.com>
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public
+ * License along with this library; if not, write to the
+ * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
-#include "streamoutpipe.h"
-
-#include <string.h>
 #include <stdio.h>
+#include "streamoutpipe.h"
 
 #define GST_TYPE_VENTUZ_CLOCK (ventuz_clock_get_type())
 #define GST_VENTUZ_CLOCK(obj) (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_VENTUZ_CLOCK,VentuzClock))
+
+struct VentuzClock
+{
+    GstSystemClock clock;
+    uint64_t refFrame;
+};
 
 struct VentuzClockClass
 {
@@ -341,7 +363,7 @@ namespace StreamOutPipe
         g_mutex_lock(&timeLock);
 
         int64_t delta = timeCode - lastTimeCode;
-        if (delta<-100 || delta>0)
+        if (delta<-10 || delta>0)
         {
             dur = GST_SECOND * frDen / frNum;
             time += dur;
