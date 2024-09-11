@@ -50,7 +50,7 @@ static void ventuz_clock_init(VentuzClock* clock)
     GST_OBJECT_FLAG_SET(clock, GST_CLOCK_FLAG_CAN_SET_MASTER);
 }
 
-VentuzClock* ventuz_clock_new(const gchar* name)
+static VentuzClock* ventuz_clock_new(const gchar* name)
 {
     VentuzClock* self =
         GST_VENTUZ_CLOCK(g_object_new(GST_TYPE_VENTUZ_CLOCK, "name", name,

@@ -85,7 +85,7 @@ static void ventuz_audio_src_on_audio(void* opaque, const uint8_t* data, size_t 
 
     // timestamps
     auto& header = self->outputHeader;
-    GstClockTimeDiff dur = size * GST_SECOND / (4 * header.audioRate);
+    GstClockTimeDiff dur = size * GST_SECOND / (4ll * header.audioRate);
     GST_BUFFER_DURATION(buffer) = dur;
 
     GstClock* clock = gst_element_get_clock(GST_ELEMENT(self));
